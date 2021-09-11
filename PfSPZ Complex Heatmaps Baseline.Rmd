@@ -47,10 +47,10 @@ myFilter <- "preSEQMonk" #filter to remove based on library sizes prior to SEQMo
 CPMFILTER <- 7.5e6 #filter any samples with mapped library sizes less than 7.5 million reads
 myCPMFILTER <- gsub("00000","e5", paste0(myFilter, CPMFILTER, "cpm"))
 
-col.hclust.method <- "pam" #ward.D2" #from ?hclust: This should be (an unambiguous abbreviation of) one of "ward.D", "ward.D2", "single", "complete", "average" (= UPGMA),"mcquitty" (= WPGMA), "median" (= #WPGMC) or "centroid" (= UPGMC). 
-col.dist.method <- "euclidean" #"pearson" #pearson #spearman #euclidean #mahattan
+col.hclust.method <- "pam" 
+col.dist.method <- "euclidean" 
 row.hclust.method <- "pam" 
-row.dist.method <- "euclidean" #"pearson" #pearson #spearman #euclidean #mahattan
+row.dist.method <- "euclidean" 
 PCT <- 100
 
 filter.type <- paste("mads",PCT,"pct",sep="")
@@ -75,11 +75,6 @@ x$treat <- factor(x$treat, levels = c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5
 ## Add additional baseline data
 
 ```{r add additional baseline data, message=FALSE, warning=FALSE}
-#local
-#CBCdat <- readxl::read_excel("/Volumes/GoogleDrive/My Drive/Tran Lab Shared/Projects/Doris Duke PfSPZ Kenya/Tuan PfSPZ/KenyaPfSPZ/CBC baseline with days before VAX1.xlsx")
-#WeightDat <- read_csv("/Volumes/GoogleDrive/My Drive/Tran Lab Shared/Projects/Doris Duke PfSPZ Kenya/CDC PfSPZ Trial Results/KSPZV1_anthro_2021-04-12.csv")
-
-#from google drive
 #CBC data
 temp <- tempfile(fileext = ".xlsx")
 dl <- drive_download(
@@ -121,9 +116,6 @@ dim(x)
 ## Add BTM data to features
 
 ```{r add btm data to features, message=FALSE, warning=FALSE}
-#local
-#source("/Volumes/GoogleDrive/My Drive/R scripts/Convert High Level BTM List into Long Tibble.R")
-
 source_url("https://github.com/TranLab/kspzv1-systems-analysis/blob/main/Convert%20High%20Level%20BTM%20List%20into%20Long%20Tibble.R?raw=TRUE")
 fData(x) <- fData(x) %>%
   left_join(., hiBTM.geneid.wide, by = "GeneSymbol") %>%
@@ -679,7 +671,6 @@ for (i in 1:length(row_order(hm))){
 ## Merge with fData(x)
 
 ```{r merge with fData, message=FALSE, warning=FALSE}
-#As of 4/27/21, I have only written this for "allGroups", "delta" or Timepoint = 0, and noRowClust == 5
 #for baseline, we use the logcpm expression for all infants but limited to genes in GC2 and rank by expression
 if(myGroup == "allGroups"){
   if(myTimepoint == 0){
@@ -740,8 +731,6 @@ if(myGroup == "allGroups"){
       ungroup()
     cl12.summarized <- cl12.summarized %>%
       dplyr::select(GeneSymbol, newRankMetric) %>%
-      #group_by(GeneSymbol) %>%
-      #summarise(newRankMetric = median(newRankMetric)) %>%
       arrange(desc(newRankMetric))
     cl12.ranklist <- data.frame(GeneSymbol = cl12.summarized$GeneSymbol, newRankMetric = cl12.summarized$newRankMetric) %>%
       arrange(desc(newRankMetric))
@@ -816,8 +805,6 @@ set.seed(23)
 if(myTimepoint == 0){
 ranks <- deframe(cl12.ranklist)
 }
-#head(ranks,10)
-#tail(ranks,10)
 if(myTimepoint == 0){
 devtools::source_url("https://github.com/TranLab/ModuleLists/blob/main/NamedGeneRankList2GseaTable.R?raw=TRUE")
 GSEA_baseline_bound_df <- NamedGeneRankList2GseaTable(rankedgenes = ranks, geneset = "bloodmodules", output_directory = tempdir(), filename_prefix = paste0("PfSPZ_GSEA_", myTimepoint,
