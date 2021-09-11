@@ -1,0 +1,658 @@
+---
+title: "PfSPZ correlation chord diagrams: Delta (Post-vaccination- baseline)"
+author: "Prasida Holla"
+date: "9/07/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objective:
+To make linear correlations between the PfSPZ vaccine transcriptomic data and non-trasncriptomic data, the latter of which includes select features form the phenoData, flow cytometric parameters and cytokine levels as assessed by luminex cytokine array. The transcriptomic data from RNA-seq is collapsed into high level blood transcription modules (BTMs) or into Monaco et al. modules. The correlations are visualized as a chord diagram or circos plot. 
+
+Steps:
+1. Filter and keep select features from non-transcriptomic data (Phil Swanson's FACS data, post-vaccination CSP-specific IgG antibody levels and cytokine levels)
+2. Load the expression set and filter the phenoData for Time point (0 for baseline, 25 for post-vaccination), and time to parasitemia at 6 months. 
+3. Merge the selected phenoData features with the filtered non-transcritomic data. We will call this "alldata"
+4. Collapse transcriptomic data (eset) into blood transcription modules (BTMs) or Monaco et al. modules
+5. Merge the "alldata" with the BTMs or Monaco modules using patient ID
+6. Run correlations using ggcorrplot, which should give a table of Pearson's r values and pvalues for each correlation
+7. Convert pvalues to FDR and use it to keep only significant correlations
+8. Keeping only the top triangle of the correlation matrix, use the package 'Circlize' to visualize the correlations as a chord diagram (aka circos plot). 
+9. This script is specifically for delta (post-vaccination- baseline) features
+
+Notes: 
+- Cytokine levels were not included in  the correlations of delta features
+
+## Load required packages
+
+```{r load libraries, include = TRUE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tibble)
+library(viridis)
+library(ggpubr)
+library(readxl)
+library(ggcorrplot)
+library(org.Hs.eg.db)
+library(Biobase)
+library(miscTools)
+library(ggcorrplot)
+library(circlize)
+library(RColorBrewer)
+library(doBy)
+library(googledrive)
+```
+
+# Import the expression set and non-transcriptomic data (FACS, cytokine, ICS)
+
+```{r load data,  message=FALSE, warning=FALSE}
+
+##import all non-transcriptomic data
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("10Uv9gzqZTVtyIqEmYdE9JpJUnJ8ZCPdT"), path = temp, overwrite = TRUE)
+facs <- readRDS(file = dl$local_path)
+
+#load the delta expression dataset
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("10uFfj5fPGyuUlMkITBH52cVXO1rpRwoo"), path = temp, overwrite = TRUE)
+eset <- readRDS(file = dl$local_path)
+```
+
+#Keep only select columns from the phenoData of the eset (Patient ID,Sample ID, time to parasitemia at six months)
+
+```{r filter PhenoData,  message=FALSE, warning=FALSE}
+positions<-c(1, 2, 7, 11)
+pData(eset)<-  pData(eset)%>%
+dplyr::select(positions)
+```
+
+#Keep only select columns from the non-transcriptomic data ("facs")
+
+```{r filter non-transcriptomic data,  message=FALSE, warning=FALSE}
+
+facs<-facs %>%
+  dplyr::select(!contains("log2 fold-change anti-CSP IgG")) %>%
+  dplyr::select(!contains("FACS_CD3+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_CD3+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD3+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_CD3+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_CD3+CD4+_of_live_lymphocytes")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_CD3+CD4+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD3+CD4+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_CD3+CD4+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_CD3+CD8+_of_live_lymphocytes")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_CD3+CD8+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD3+CD8+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_CD3+CD8+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CD19+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD19+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_Plasmablasts_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_Plasmablasts_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_CSP-specific_memory_B_cells_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CSP-specific_memory_B_cells_of_live_leukocytes")) %>%
+  # dplyr::select(!contains("FACS_CD11c+_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD11c+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CD14+_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD14+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_CD56+CD16+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD56+CD16+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_memory_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_naive_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_IgG+_of_memory")) %>%
+  dplyr::select(!contains("FACS_IgM+_of_memory")) %>%
+  dplyr::select(!contains("FACS_IgG-IgM-_of_memory")) %>%
+  #dplyr::select(!contains("FACS_CSP-spec_of_memory_B_cells")) %>%
+  dplyr::select(!contains("FACS_CSP-spec_of_B_cells")) %>%
+  #dplyr::select(!contains("FACS_IgG_of_CSP-spec")) %>%
+  #dplyr::select(!contains("FACS_IgM_of_CSP-spec")) %>%
+  #dplyr::select(!contains("FACS_IgG-IgM-_of_CSP-spec")) %>%
+  dplyr::select(!contains("FACS_PBs_of_memory")) %>%
+  dplyr::select(!contains("FACS_PBs_of_B_cells")) %>%
+  #dplyr::select(!contains("FACS_atypical_memory_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_immature_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_TCRgd")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vd1_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vd1_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vd1_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vd1_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vd1/2-_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vd1/2-_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vd1/2-_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vd1/2-_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vd2_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vd2_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vd2_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vd2_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vg9-_of_Vd2_cells")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vg9-_of_Vd2_cells")) %>%
+  dplyr::select(!contains("FACS_Vg9-Vd2+_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vg9-Vd2+_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vg9-Vd2+_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vg9-Vd2+_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vg9+_of_Vd2_cells")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vg9+_of_Vd2_cells")) %>%
+  dplyr::select(!contains("FACS_Vg9+Vd2+_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vg9+Vd2+_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vg9+Vd2+_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vg9+Vd2+_of_TCRgd")) %>%
+  #dplyr::select(!contains("FACS_CD14+CD16+_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD14+CD16+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CD14+CD16-_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD14+CD16-_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CD14-CD16+_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD14-CD16+_of_live_PBMCs"))%>%
+  dplyr::select(!contains("CytokineObsConc_CCL2_MCP-1")) %>%
+  dplyr::select(!contains("CytokineObsConc_CCL4_MIP-1_beta")) %>%
+  dplyr::select(!contains("CytokineObsConc_CXCL10_IP-10")) %>%
+  dplyr::select(!contains("CytokineObsConc_GM-CSF")) %>%
+  dplyr::select(!contains("CytokineObsConc_IFN-alpha")) %>%
+  dplyr::select(!contains("CytokineObsConc_IFN-beta")) %>%
+  dplyr::select(!contains("CytokineObsConc_IFN-gamma")) %>%
+  dplyr::select(!contains("CytokineObsConc_IL-1_beta")) %>%
+  dplyr::select(!contains("CytokineObsConc_IL-10")) %>%
+  dplyr::select(!contains("CytokineObsConc_IL-12_p70")) %>%
+  dplyr::select(!contains("CytokineObsConc_IL-2")) %>%
+dplyr::select(!contains("CytokineObsConc_IL-4")) %>%
+dplyr::select(!contains("CytokineObsConc_IL-6")) %>%
+dplyr::select(!contains("CytokineObsConc_IL-8_CXCL8")) %>%
+dplyr::select(!contains("CytokineObsConc_TNF-alpha")) %>%
+dplyr::select(!contains("ICS_IL-1ß_pct_of_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_IL-1ß_Count")) %>%
+  dplyr::select(!contains("ICS_IL-1ß_MFI_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_IL-8_pct_of_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_IL-8_Count")) %>%
+  dplyr::select(!contains("ICS_IL-8_MFI_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_TNF_pct_of_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_CD86_MFI_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_HLA-DR_MFI_live_monocytes"))%>%
+  dplyr::select(!contains("ICS_TNF_MFI_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_TNF_count")) 
+```
+
+# Calculate delta non-transcriptomic features
+```{r delta facs data, message=FALSE, warning=FALSE}
+baseline<-facs%>%filter(grepl("_0", PATID.OG))
+nrow(baseline) ##337
+
+postvax<-facs%>%filter(grepl("_25", PATID.OG))
+nrow(postvax) ##337
+
+p<-postvax[,c(2:ncol(postvax))]
+b<-baseline[,c(2:ncol(baseline))]
+
+delta_facs<-p-b
+
+rownames(delta_facs)<-postvax$PATID.OG
+delta_facs<-delta_facs%>%rownames_to_column(., var="PATID_XX")
+delta_facs<-delta_facs%>% dplyr::mutate(.,"PATID.OG"=  str_replace(PATID_XX, '_.*',''))
+delta_facs<-delta_facs[, -c(1,2)]
+delta_facs <- delta_facs %>%
+  dplyr::select(PATID.OG, everything())
+```
+
+#Merge non-transcriptomic data 'alldata' into the pData of 'eset'
+
+```{r merge phenoData with other non-transcriptomic data,  message=FALSE, warning=FALSE}
+pheno_data<-pData(eset)%>%rownames_to_column(., var="PATID.OG")
+#Merge
+alldata<-pheno_data%>%left_join(., delta_facs, by="PATID.OG")
+```
+
+# Convert Gene expression data to BTMs for downstream analyses
+
+```{r collapse eset to hi-level BTMs,  message=FALSE, warning=FALSE}
+#Step 1: Scale the data
+exprs(eset) <- exprs(eset) %>%
+  t(.) %>%
+  scale(., center = TRUE, scale = TRUE) %>% #generating z scores using scale function
+  t(.)
+
+#Step 2: Convert ENSEMBL ids to gene names
+symbols <- mapIds(org.Hs.eg.db,
+keys=row.names(exprs(eset)),
+column="SYMBOL",
+keytype="ENSEMBL",
+multiVals="first")
+expr_data<-merge(exprs(eset), symbols, by=0)
+expr_data<-expr_data[,-1]
+expr_data<-expr_data[!duplicated(expr_data$y),]
+expr_data<-expr_data[!is.na(expr_data$y),] ## or you can run --> expr_data<-subset(expr_data, !is.na(expr_data$y))
+rownames(expr_data)<-(expr_data[,231])
+expr_data<-expr_data[,-231]
+
+# Step 3: Collapse into level BTMs
+temp <- tempfile(fileext = ".xls")
+dl <- drive_download(
+  as_id("10Y_uqDxPY92uf7wGhnyQBXhAen53NYhV"), path = temp, overwrite = TRUE)
+btmxls <- readxl::read_excel(dl$local_path)
+
+btm <- as.list(as.character(btmxls$`Module member genes`))
+names(btm) <- btmxls$ID
+
+for(i in 1:length(btm)){
+  btm[[i]] <- gsub(" ///", ",", btm[[i]])
+  btm[[i]] <- gsub(" ", "", btm[[i]])
+  btm[[i]] <- unlist(strsplit(btm[[i]], "," ))
+}
+
+# import the hilevel BTM table 
+temp <- tempfile(fileext = ".csv")
+dl <- drive_download(
+  as_id("10a_5y-WYxdSg7iCIcNvubHGsOEFYblsw"), path = temp, overwrite = TRUE)
+hilevel <- read.csv(dl$local_path)[,1:2]
+
+as.list(hilevel)
+colnames(hilevel) <- c("BTM", "SUBGROUP")
+hilevel.foo <- reshape2::recast(hilevel, SUBGROUP~BTM, id.var = c("SUBGROUP","BTM"))
+hilevel.foo <- hilevel.foo[-1,]
+foo <- c()
+for(i in 1:nrow(hilevel.foo)){
+  foo[[i]] <- hilevel.foo[i,][!is.na(hilevel.foo[i,])]
+  names(foo)[i] <- foo[[i]][1]
+  foo[[i]]    <- foo[[i]][-1]
+}
+
+hilevel_list <- c()
+for(i in 1:length(foo)){
+  hilevel_list[[i]] <- unique(gsub(" ", "", unlist(btm[foo[[i]]])))
+}
+
+names(hilevel_list) <- names(foo)
+annot.btm <- hilevel[,c(1,2)]
+```
+
+# Gene expression to BTMs continued..
+
+```{r convert to hi-level BTMs,  message=FALSE, warning=FALSE}
+COLFUN <- miscTools::colMedians
+for(i in 1:length(hilevel_list)){
+  hilevel_list[[i]] <- gsub(" ///", ",", hilevel_list[[i]])
+  hilevel_list[[i]] <- unlist(strsplit(hilevel_list[[i]], "," ))
+}
+
+pas <- c()
+for( i in 1:length(hilevel_list)){
+  pas[[i]] <- COLFUN(expr_data[intersect(unique(gsub(" ", "",hilevel_list[[i]])),rownames(expr_data)),, drop = FALSE], na.rm = TRUE) #pathway activity score defined as column means/medians depending how COLFUN is defined above 
+}
+
+names(pas) <- names(hilevel_list)
+pas.df <- do.call("rbind", pas)
+pas.df<-data.frame(pas.df)%>%rownames_to_column(., var = "BTM")
+pas.df<-t(pas.df) 
+colnames(pas.df) <- pas.df[1,]
+pas.df<-pas.df[-1,]
+pas.df<-data.frame(pas.df)%>%rownames_to_column(., var="PATID.OG")
+# Change all the scores in the matrix from 'factor' to 'numeric'
+indx <- sapply(pas.df, is.factor)
+pas.df[indx] <- lapply(pas.df[indx], function(x) as.numeric(as.character(x)))
+```
+
+#Convert Gene expression data to Monaco modules for downstream analyses
+
+```{r Collapse eset to Monaco et al modules,  message=FALSE, warning=FALSE}
+temp <- tempfile(fileext = ".xlsx")
+dl <- drive_download(
+  as_id("10fcspvnboiFYBVT_HQyYOJc2Vc-cL1jt"), path = temp, overwrite = TRUE)
+MonacoMatrix <- readxl::read_excel(dl$local_path, sheet = "ABIS-Seq")
+
+ScaledMatrix <- MonacoMatrix %>%
+column_to_rownames(var = 'Gene symbol') %>%
+  t() %>%
+  scale()
+
+celltypes <- rownames(ScaledMatrix)
+foo <- c()
+for(i in celltypes){
+  foo[[i]] <- ScaledMatrix[i,]
+  foo[[i]] <- foo[[i]][foo[[i]]>1.75  & !is.na(foo[[i]])]
+  foo[[i]] <- foo[[i]][order(foo[[i]], decreasing = TRUE)]
+  foo[[i]] <- names(foo[[i]])
+}
+MonacoModules <- foo
+
+
+COLFUN <- miscTools::colMedians
+for(i in 1:length(MonacoModules)){
+  MonacoModules[[i]] <- gsub(" ///", ",", MonacoModules[[i]])
+  MonacoModules[[i]] <- unlist(strsplit(MonacoModules[[i]], "," ))
+}
+pas_m <- c()
+for( i in 1:length(MonacoModules)){
+  pas_m[[i]] <- COLFUN(expr_data[intersect(unique(gsub(" ", "",MonacoModules[[i]])),rownames(expr_data)),, drop = FALSE], na.rm = TRUE) 
+}
+names(pas_m) <- names(MonacoModules)
+pas_m.df <- do.call("rbind", pas_m)
+
+pas_m.df<-t(pas_m.df)  ## see next chunk for delta
+pas_m.df<-data.frame(pas_m.df)%>%rownames_to_column(., var="PATID.OG")
+```
+
+#join non-transcriptomic to transcriptomic data- hilevel BTMs or Moanco et al modules
+```{r merge non-transcriptomic and transcriptomic data,  message=FALSE, warning=FALSE}
+# For high-level BTMs
+all_data_btm<-alldata%>%
+left_join(., pas.df,  by="PATID.OG")
+
+# For Monaco modules
+all_data_monaco<-alldata%>%
+left_join(., pas_m.df,  by="PATID.OG")
+```
+
+# Rename the columns in the merged data at this point, since these names will be carried over to the final correlation matrix
+```{r rename column names,  message=FALSE, warning=FALSE}
+
+## For high-level BTMs:
+all_data_btm<-all_data_btm %>%
+  dplyr::rename("Outcome" = "tte.mal.atp.6") %>%
+  dplyr::rename("PfSPZ stimulated CD4+ T cells" = "FACS_PfSPZ-specific_CD3+CD4+_of_live_lymphocytes")%>%
+  dplyr::rename( "PfSPZ stimulated CD8+ T cells"= "FACS_PfSPZ-specific_CD3+CD8+_of_live_lymphocytes")%>%
+  dplyr::rename("CD19+ B cells" = "FACS_CD19+_of_live_lymphocytes")%>%
+  dplyr::rename("FACS Plasmablasts" = "FACS_Plasmablasts_of_live_lymphocytes")%>%
+  dplyr::rename("CD11c+ monocytes" = "FACS_CD11c+_of_live_monocytes")%>%
+  dplyr::rename("CD14+ monocytes" = "FACS_CD14+_of_live_monocytes")%>%
+  dplyr::rename("CSP specific of memory B cells" = "FACS_CSP-spec_of_memory_B_cells")%>%
+  dplyr::rename("IgG+ of CSP specific B cells" = "FACS_IgG_of_CSP-spec")%>%
+  dplyr::rename("IgM+ of CSP specific B cells" = "FACS_IgM_of_CSP-spec")%>%
+  dplyr::rename("IgG-IgM- of CSP specific B cells"= "FACS_IgG-IgM-_of_CSP-spec")%>%
+  dplyr::rename("Atypical memory of B cells" = "FACS_atypical_memory_of_B_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ1 of T cells"  = "FACS_PfSPZ-specific_Vd1_of_T_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ1/2 of T cells"  = "FACS_PfSPZ-specific_Vd1/2-_of_T_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ9-Vδ2+ of T cells"  = "FACS_PfSPZ-specific_Vg9-Vd2+_of_T_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ9+Vδ2+ of T cells"  = "FACS_PfSPZ-specific_Vg9+Vd2+_of_T_cells")%>%
+  dplyr::rename("CD14+CD16+ of monocytes"  = "FACS_CD14+CD16+_of_live_monocytes")%>%
+  dplyr::rename("CD14+CD16- of monocytes"  = "FACS_CD14+CD16-_of_live_monocytes")%>%
+  dplyr::rename("CD14-CD16+ of monocytes"  = "FACS_CD14-CD16+_of_live_monocytes")%>%
+  dplyr::rename("Postvax anti-CSP IgG"  = "anti-CSP IgG")%>%
+      dplyr::rename("ANTIGEN PRESENTATION"  = "ANTIGEN.PRESENTATION")%>%
+      dplyr::rename("CELL CYCLE"  = "CELL.CYCLE")%>%
+      dplyr::rename("DC ACTIVATION"  = "DC.ACTIVATION")%>%
+      dplyr::rename("ECM AND MIGRATION"  = "ECM.AND.MIGRATION")%>%
+      dplyr::rename("INFLAMMATORY/ TLR CHEMOKINES"  = "INFLAMMATORY.TLR.CHEMOKINES")%>%
+  dplyr::rename("INTERFERON/ ANTIVIRAL SENSING"  = "INTERFERON.ANTIVIRAL.SENSING")%>%
+  dplyr::rename("MONOCYTES"  = "MONOCYTES")%>%
+    #dplyr::rename("NEUTROPHILS"  = "NEUTROPHILS")%>%
+    dplyr::rename("NK CELLS"  = "NK.CELLS")%>%
+    dplyr::rename("PLASMA CELLS"  = "PLASMA.CELLS")%>%
+    dplyr::rename("SIGNAL TRANSDUCTION"  = "SIGNAL.TRANSDUCTION")%>%
+     dplyr::rename("T CELLS"  = "T.CELLS")%>%
+   dplyr::rename("B CELLS"  = "B.CELLS")
+
+
+## For Monaco et al. modules:
+all_data_monaco<-all_data_monaco %>%
+  dplyr::rename("Outcome" = "tte.mal.atp.6") %>%
+  dplyr::rename("PfSPZ stimulated CD4+ T cells" = "FACS_PfSPZ-specific_CD3+CD4+_of_live_lymphocytes")%>%
+  dplyr::rename( "PfSPZ stimulated CD8+ T cells"= "FACS_PfSPZ-specific_CD3+CD8+_of_live_lymphocytes")%>%
+  dplyr::rename("CD19+ B cells" = "FACS_CD19+_of_live_lymphocytes")%>%
+  dplyr::rename("FACS Plasmablasts" = "FACS_Plasmablasts_of_live_lymphocytes")%>%
+  dplyr::rename("CD11c+ monocytes" = "FACS_CD11c+_of_live_monocytes")%>%
+  dplyr::rename("CD14+ monocytes" = "FACS_CD14+_of_live_monocytes")%>%
+  dplyr::rename("CSP specific of memory B cells" = "FACS_CSP-spec_of_memory_B_cells")%>%
+  dplyr::rename("IgG+ of CSP specific B cells" = "FACS_IgG_of_CSP-spec")%>%
+  dplyr::rename("IgM+ of CSP specific B cells" = "FACS_IgM_of_CSP-spec")%>%
+  dplyr::rename("IgG-IgM- of CSP specific B cells"= "FACS_IgG-IgM-_of_CSP-spec")%>%
+  dplyr::rename("Atypical memory of B cells" = "FACS_atypical_memory_of_B_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ1 of T cells"  = "FACS_PfSPZ-specific_Vd1_of_T_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ1/2 of T cells"  = "FACS_PfSPZ-specific_Vd1/2-_of_T_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ9-Vδ2+ of T cells"  = "FACS_PfSPZ-specific_Vg9-Vd2+_of_T_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ9+Vδ2+ of T cells"  = "FACS_PfSPZ-specific_Vg9+Vd2+_of_T_cells")%>%
+  dplyr::rename("CD14+CD16+ of monocytes"  = "FACS_CD14+CD16+_of_live_monocytes")%>%
+  dplyr::rename("CD14+CD16- of monocytes"  = "FACS_CD14+CD16-_of_live_monocytes")%>%
+  dplyr::rename("CD14-CD16+ of monocytes"  = "FACS_CD14-CD16+_of_live_monocytes")%>%
+  dplyr::rename("Postvax anti-CSP IgG"  = "anti-CSP IgG")%>%
+dplyr::rename("Memory B cells"  = "B.Memory")%>%   
+  dplyr::rename("Naive B cells"  = "B.Naive")%>%   
+  dplyr::rename("Basophils"  = "Basophils.LD")%>%   
+  dplyr::rename("MAIT T cells"  = "MAIT")%>%   
+  dplyr::rename("myeloid Dendritic cells"  = "mDCs")%>%   
+  dplyr::rename("Classical monocytes"  = "Monocytes.C")%>%   
+  dplyr::rename("Non-classical monocytes"  = "Monocytes.NC.I")%>%   
+  dplyr::rename("Neutrophils"  = "Neutrophils.LD")%>%   
+  dplyr::rename("NK cells"  = "NK")%>%   
+  dplyr::rename("plasmacytoid Dendritic cells"  = "pDCs")%>%   
+ dplyr::rename("Plasmablasts Monaco module"  = "Plasmablasts")%>%   
+  dplyr::rename("Memory CD4+ T cells"  = "T.CD4.Memory")%>%   
+    dplyr::rename("Naive CD4+ T cells"  = "T.CD4.Naive")%>%   
+    dplyr::rename("Memory CD8+ T cells"  = "T.CD8.Memory")%>%   
+    dplyr::rename("Naive CD8+ T cells"  = "T.CD8.Naive")%>%   
+    dplyr::rename("Non-Vδ2 γδ T cells"  = "T.gd.non.Vd2")%>%   
+    dplyr::rename("Vδ2 γδ T cells"  = "T.gd.Vd2")
+
+#Clean up the merged table, removing columns that are not needed
+all_data_btm<-all_data_btm[,-c(1:4)]
+all_data_monaco<-all_data_monaco[,-c(1:4)]
+```
+
+#Run correlations
+
+```{r correlations of the combined all_data,  message=FALSE, warning=FALSE}
+
+## Create the corraltion matrix for BTMs
+cor_btm<-cor(na.omit(all_data_btm), use = "pairwise.complete.obs")
+# Create a p value matrix
+p.mat_btm<-cor_pmat(na.omit(all_data_btm), use="pairwise.complete.obs")
+# Convert p values to False Discovery Rates
+p.mat_btm[]<-p.adjust(p.mat_btm, method = 'BH' )
+p.mat_btm[lower.tri(p.mat_btm, diag=TRUE)] <- NA   #use adjusted P values
+p.mat_btm <- pmax(p.mat_btm, t(p.mat_btm), na.rm=TRUE)
+
+# use an FDR cutoff to include only significant correlations (cutoffs indicated in figure legends)
+fdr <- 0.1
+d_sig_btm  <- which(p.mat_btm <fdr, arr.ind = T)
+foo_cor_btm <- cor_btm[unique(d_sig_btm[,1]),unique(d_sig_btm[,2])]  #get row and columns that include significant values
+foo_pval_btm <- p.mat_btm[unique(d_sig_btm[,1]),unique(d_sig_btm[,2])]  #get row and columns that include significant values
+foo_cor_btm[foo_pval_btm>=fdr] <- 0                                 #for cor values not signficant, make 0
+foo_cor_btm[foo_cor_btm>0.999999] <- 0                                 #for cor values that are symmetric, make 0
+
+
+## Create the corraltion matrix for Monaco modules
+cor_m<-cor(na.omit(all_data_monaco), use = "pairwise.complete.obs")
+# Create a p value matrix
+p.mat_m<-cor_pmat(na.omit(all_data_monaco), use="pairwise.complete.obs")
+# Convert p values to False Discovery Rates
+p.mat_m[]<-p.adjust(p.mat_m, method = 'BH' )
+p.mat_m[lower.tri(p.mat_m, diag=TRUE)] <- NA   #use adjusted P values
+p.mat_m <- pmax(p.mat_m, t(p.mat_m), na.rm=TRUE)
+
+# use an FDR cutoff to include only significant correlations (cutoffs indicated in figure legends)
+fdr <- 0.2
+d_sig_m  <- which(p.mat_m <fdr, arr.ind = T)
+foo_cor_m <- cor_m[unique(d_sig_m[,1]),unique(d_sig_m[,2])] #get row and columns that include significant values
+foo_pval_m <- p.mat_m[unique(d_sig_m[,1]),unique(d_sig_m[,2])]  #get row and columns that include significant values
+foo_cor_m[foo_pval_m>=fdr] <- 0                                 #for cor values not signficant, make 0
+foo_cor_m[foo_cor_m>0.999999] <- 0                                 #for cor values that are symmetric, make 0
+```
+
+# Set each row of the correlation matrix into a category ("Data.Type"). This will allow us to cluster and classify the correlations into the assigned categories when creating the chord diagram
+
+```{r Assign data type to each row,  message=FALSE, warning=FALSE}
+
+## For hi-level BTMs
+combo3_btm<-as.data.frame(foo_cor_btm)
+combo3_btm$Data.Type <- " "
+combo3_btm$Data.Type <- ifelse(grepl("Outcome", rownames(combo3_btm)), "Outcome", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PfSPZ stimulated CD4\\+ T cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PfSPZ stimulated CD8\\+ T cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CD19\\+ B cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("FACS Plasmablasts", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CD11c\\+ monocytes", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CD14\\+ monocytes", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CSP specific of memory B cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("IgM\\+ of CSP specific B cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("IgG\\+ of CSP specific B cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("IgG\\-IgM\\- of CSP specific B cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("Atypical memory of B cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ1 of T cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ1/2 of T cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ9\\-Vδ2\\+ of T cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ9\\+Vδ2\\+ of T cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CD14\\+CD16\\+ of monocytes", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CD14\\+CD16\\- of monocytes", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CD14\\-CD16\\+ of monocytes", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("Postvax anti-CSP IgG", rownames(combo3_btm)), "Outcome", combo3_btm$Data.Type)
+combo3_btm$Data.Type <- ifelse(grepl("ANTIGEN PRESENTATION", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("B CELLS", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CELL CYCLE", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("DC ACTIVATION", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("ECM AND MIGRATION", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("INFLAMMATORY/ TLR CHEMOKINES", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("INTERFERON/ ANTIVIRAL SENSING", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("MONOCYTES", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("NEUTROPHILS", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("NK CELLS", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PLASMA CELLS", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("SIGNAL TRANSDUCTION", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("T CELLS", rownames(combo3_btm)), "Gene Expression", combo3_btm$Data.Type) 
+
+
+## For Monaco modules
+combo3_monaco<-as.data.frame(foo_cor_m)
+combo3_monaco$Data.Type <- " "
+combo3_monaco$Data.Type <- ifelse(grepl("Outcome", rownames(combo3_monaco)), "Outcome", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("PfSPZ stimulated CD4\\+ T cells", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("PfSPZ stimulated CD8\\+ T cells", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("CD19\\+ B cells", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("FACS Plasmablasts", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("CD11c\\+ monocytes", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("CD14\\+ monocytes", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("CSP specific of memory B cells", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("IgM\\+ of CSP specific B cells", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("IgG\\+ of CSP specific B cells", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("IgG\\-IgM\\- of CSP specific B cells", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("Atypical memory of B cells", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ1 of T cells", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ1/2 of T cells", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ9\\-Vδ2\\+ of T cells", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ9\\+Vδ2\\+ of T cells", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("CD14\\+CD16\\+ of monocytes", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("CD14\\+CD16\\- of monocytes", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("CD14\\-CD16\\+ of monocytes", rownames(combo3_monaco)), "Cellular expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("Postvax anti-CSP IgG", rownames(combo3_monaco)), "Outcome", combo3_monaco$Data.Type)
+combo3_monaco$Data.Type <- ifelse(grepl("Memory B cells", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type)
+combo3_monaco$Data.Type <- ifelse(grepl("Naive B cells", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("Basophils", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("MAIT T cells", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("myeloid Dendritic cells", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("Classical monocytes", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("Non-classical monocytes", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("Neutrophils", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("NK cells", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("plasmacytoid Dendritic cells", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("Plasmablasts Monaco module", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("Memory CD4\\+ T cells", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("Naive CD4\\+ T cells", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("Memory CD8\\+ T cells", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("Naive CD8\\+ T cells", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type) 
+combo3_monaco$Data.Type <- ifelse(grepl("Non-Vδ2 γδ T cells", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type)  
+combo3_monaco$Data.Type <- ifelse(grepl("Vδ2 γδ T cells", rownames(combo3_monaco)), "Gene Expression", combo3_monaco$Data.Type)
+```
+
+#Plot the chord diagram for high level BTMs
+# Note: In delta and post-vaccination chord diagrams, sectors are not highlighted and the highlight.sector section doesn't work. These have to be added manually for individual sectors (see below, "highlight.sector") , or created in AI
+
+```{r plot chord diagram,  message=FALSE, warning=FALSE}
+palette(brewer.pal(12, "Set3"))
+
+# Chord diagram for BTMs
+set.seed(12)
+df1_btm <- data.frame(variable = as.character(rownames(combo3_btm)), Group1 = combo3_btm$Data.Type)
+gl1_btm <- split(df1_btm$variable, df1_btm$Group1, drop = FALSE)
+gl1_btm <- sapply(gl1_btm, as.character)
+group_color1_btm <- structure(circlize::rand_color(length(gl1_btm),hue = "monochrome", transparency = 0.5, luminosity = "dark"), names = names(gl1_btm))
+n_group1_btm <-  length(gl1_btm)
+
+## to get CSP-specific IgG, outcome and dose together
+combo3_btm<-combo3_btm %>% arrange(factor(Data.Type, levels = c("Outcome", "Antibody","Cellular expression", "Gene Expression"))) 
+
+combo4_btm <- combo3_btm[,intersect(rownames(combo3_btm), colnames(combo3_btm))]
+
+#keep only the top triangle of the matrix, otherwise each correlation shows up twice on the diagram
+combo4_btm[upper.tri(combo4_btm)] <- 0  
+combo4_btm[combo4_btm<0] <- 0
+combo4_btm[combo4_btm == 0] <- NA
+
+mat_btm <- as.matrix(combo4_btm)
+order_btm<-colnames(mat_btm)
+col_fun_btm <- colorRamp2(c( 0, 1), c( "white", "darkblue"), transparency = 0.5)
+
+
+cairo_pdf("Timpoint_delta_FDR_0.1_Hilevel_BTMS.pdf", height = 10, width = 10)
+circos.par(canvas.xlim = c(-1.8,1.8), canvas.ylim = c(-1.8,1.8), points.overflow.warning=FALSE, 
+           track.margin = c(0.01, 0.05), # adjust bottom and top margin
+           track.height = 0.05, start.degree = 180)
+chordDiagram(mat_btm, order=order_btm, col = col_fun_btm(mat_btm), annotationTrack = NULL, link.largest.ontop = TRUE, preAllocateTracks = list(track.height = 0.1), transparency = 0.25, self.link = 1)
+circos.trackPlotRegion(track.index = 1, panel.fun = function(x, y) {
+  xlim = get.cell.meta.data("xlim")
+  ylim = get.cell.meta.data("ylim")
+  sector.name = get.cell.meta.data("sector.index")
+  circos.text(mean(xlim), ylim[1] + 1, sector.name, facing = "clockwise", niceFacing = TRUE, adj = c(0, 0), cex = 0.7) #text for parameters
+  circos.axis(h = "top", labels.cex = 0.3, major.tick = FALSE, sector.index = sector.name, track.index = 1, labels = FALSE)
+}, bg.border = NA)
+highlight.sector(rownames(combo3_btm)[which(combo3_btm$Data.Type == "Outcome")],
+                 track.index = get.all.track.index(), col = "grey",
+                 text = "Outcome", cex = 0.8, text.col = "black", niceFacing = TRUE)
+# Gene expression
+highlight.sector(rownames(combo3_btm)[which(combo3_btm$Data.Type == "Gene Expression")],
+                 track.index = get.all.track.index(), col = "cyan",
+                 text = "Gene Expression", cex = 0.8, text.col = "black", niceFacing = TRUE)
+# Cellular Expression 
+#highlight.sector(rownames(combo3_btm)[which(combo3_btm$Data.Type == "Cellular expression")],
+#                 track.index = get.all.track.index(), col = "blue",
+#                 text = "Cellular Expression", cex = 0.8, text.col = "pink", niceFacing = TRUE)
+dev.off()
+circos.clear()
+# Upload the plot
+drive_upload("Timpoint_delta_FDR_0.1_Hilevel_BTMS.pdf")
+```
+
+#Plot the chord diagram for Monaco modules
+
+```{r}
+palette(brewer.pal(12, "Set3"))
+set.seed(12)
+df1_monaco <- data.frame(variable = as.character(rownames(combo3_monaco)), Group1 = combo3_monaco$Data.Type)
+gl1_monaco <- split(df1_monaco$variable, df1_monaco$Group1, drop = FALSE)
+gl1_monaco <- sapply(gl1_monaco, as.character)
+group_color1_monaco <- structure(circlize::rand_color(length(gl1_monaco),hue = "monochrome", transparency = 0.5, luminosity = "dark"), names = names(gl1_monaco))
+n_group1_monaco <-  length(gl1_monaco)
+
+## to get CSP-specific IgG, outcome and dose together
+combo3_monaco<-combo3_monaco %>% arrange(factor(Data.Type, levels = c("Outcome", "Antibody","Cellular expression",  "Gene Expression"))) 
+
+combo4_monaco <- combo3_monaco[,intersect(rownames(combo3_monaco), colnames(combo3_monaco))]
+
+#keep only the top triangle of the matrix, otherwise each correlation shows up twice on the diagram
+combo4_monaco[upper.tri(combo4_monaco)] <- 0  
+combo4_monaco[combo4_monaco<0] <- 0
+combo4_monaco[combo4_monaco == 0] <- NA
+
+mat_monaco <- as.matrix(combo4_monaco)
+order_monaco<-colnames(mat_monaco)
+col_fun_monaco <- colorRamp2(c( 0, 1), c( "white", "darkblue"), transparency = 0.5)
+
+
+cairo_pdf("Timpoint_delta_FDR_0.2_Monaco.pdf", height = 10, width = 10)
+circos.par(canvas.xlim = c(-1.8,1.8), canvas.ylim = c(-1.8,1.8), points.overflow.warning=FALSE, 
+           track.margin = c(0.01, 0.05), # adjust bottom and top margin
+           track.height = 0.05, start.degree = 180)
+chordDiagram(mat_monaco, order=order_monaco, col = col_fun_monaco(mat_monaco), annotationTrack = NULL, link.largest.ontop = TRUE, preAllocateTracks = list(track.height = 0.1), transparency = 0.25, self.link = 1)
+circos.trackPlotRegion(track.index = 1, panel.fun = function(x, y) {
+  xlim = get.cell.meta.data("xlim")
+  ylim = get.cell.meta.data("ylim")
+  sector.name = get.cell.meta.data("sector.index")
+  circos.text(mean(xlim), ylim[1] + 1, sector.name, facing = "clockwise", niceFacing = TRUE, adj = c(0, 0), cex = 0.7) #text for parameters
+  circos.axis(h = "top", labels.cex = 0.3, major.tick = FALSE, sector.index = sector.name, track.index = 1, labels = FALSE)
+}, bg.border = NA)
+highlight.sector(rownames(combo3_monaco)[which(combo3_monaco$Data.Type == "Outcome")],
+                 track.index = get.all.track.index(), col = "grey",
+                 text = "Outcome", cex = 0.8, text.col = "black", niceFacing = TRUE)
+dev.off()
+circos.clear()
+# Upload the plot
+drive_upload("Timpoint_delta_FDR_0.2_Monaco.pdf")
+```
