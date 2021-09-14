@@ -1,0 +1,255 @@
+---
+title: "ST3GAL3 Heatmap from various datasets"
+author: "Prasida Holla"
+date: "09/03/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load required packages 
+
+```{r load libraries, include = TRUE, message=FALSE, warning=FALSE}
+library(ComplexHeatmap)
+library(tidyverse)
+library(Seurat) 
+library(grid)
+library(googledrive)
+```
+
+# Objective
+This is formaking heatmaps that compare the expresseion levels of a gene of interest, in this case, ST3GAL3, across published transcriptomic datasets
+The datasets used here include
+1. RNA HPA blood cell gene data (available for downlaod at https://www.proteinatlas.org/about/download, Citation:  Uhlen M, Karlsson MJ, … Fagerberg L, Brodin P. A genome-wide transcriptomic analysis of protein-coding genes in human blood cells. Science. 2019 366(6472)) 
+
+2.RNA Monaco blood cell gene data (available for download at https://www.proteinatlas.org/about/download, Accession number: GSE107011)
+
+3.RNA Schmiedel blood cell gene data (avaialble for download at https://www.proteinatlas.org/about/download, Accession number:  phs001703.v1.p1.)
+
+4.10x Genomics scRNA-seq of unsorted PBMCs (10,0000 cell dataset)- avaialbe at https://satijalab.org/seurat/archive/v3.0/atacseq_integration_vignette.html
+
+5. 10x Genomics scRNA-seq of unsorted PBMCs (68,000 cell dataset)- available at https://github.com/10XGenomics/single-cell-3prime-paper/tree/master/pbmc68k_analysis
+
+#Step 1: Import bulk RNA-seq datasets
+
+```{r import RNA-seq datasets downloaded from Protein Atlas onto Google Drive,  message=FALSE, warning=FALSE}
+#HPA_Blood
+temp <- tempfile(fileext = ".tsv")
+dl <- drive_download(
+  as_id("1-NhBNSH5iE8ZbnZjlq5M8yCj1x4o5sK7"), path = temp, overwrite = TRUE)
+hpa_blood <- read.table(file = dl$local_path, sep = '\t', header = TRUE, check.names = F)
+
+# Monaco
+temp <- tempfile(fileext = ".tsv")
+dl <- drive_download(
+  as_id("1-KVniCQuQnxSsw78MhyHGMT1zdIvUIf3"), path = temp, overwrite = TRUE)
+monaco <- read.table(file = dl$local_path, sep = '\t', header = TRUE, check.names = F)
+
+# Schmiedel
+temp <- tempfile(fileext = ".tsv")
+dl <- drive_download(
+  as_id("1-KM25oR5mCubweOHzO80_Ul8rMIHeJuC"), path = temp, overwrite = TRUE)
+schmiedel <- read.table(file = dl$local_path, sep = '\t', header = TRUE, check.names = F)
+```
+
+#Step 2: Keep only gene(s) of interest (ST3GAL3) from each of the three bulk RNA-seq datasets
+
+```{r filter bulk RNAseq datasets for ST3GAL3,  message=FALSE, warning=FALSE}
+#HPA_blood
+hpa_blood<-hpa_blood%>%rename("Gene_name"="Gene name")%>%filter(Gene_name %in% "ST3GAL3")
+hpa_blood<-hpa_blood[,c(2,3,5)]
+
+#Schmiedel
+schmiedel<-schmiedel%>%rename("Gene_name"="Gene name")%>%filter(Gene_name %in% "ST3GAL3")
+schmiedel<-schmiedel[,c(2,3,4)]
+
+#Monaco
+monaco<-monaco%>%rename("Gene_name"="Gene name")%>%filter(Gene_name %in% "ST3GAL3")
+monaco<-monaco[,c(2,3,5)]
+```
+
+# Step 3: single cell RNA-seq dataset of PBMCs (10K cells)
+# Data and clustering vignette avaialble at https://satijalab.org/seurat/archive/v3.0/atacseq_integration_vignette.html
+
+```{r scRNA-seq 10K PBMC dataset,  message=FALSE, warning=FALSE}
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("1-MazHxBYuYspDODX2LsoleOQaGRW5vbf"), path = temp, overwrite = TRUE)
+pbmc10k <- readRDS(file = dl$local_path)
+
+pbmc10k<-FetchData(pbmc10k, c("celltype","ST3GAL3"))
+pbmc10k<-pbmc10k%>%tibble::rownames_to_column(., )
+pbmc10k<-pbmc10k[,-1]
+pbmc10k<-pbmc10k%>%group_by(celltype)%>%summarise_all(funs(mean))
+pbmc10k<-pbmc10k%>%rename("Blood cell"="celltype")%>%rename("scRNAseq_10k"="ST3GAL3")
+```
+
+# Step 4: single cell RNA-seq dataset of PBMCs (68K cells)
+# Data and clustering vignette avaialble on the 10x Genomics website 
+# Citation: Zheng, G., Terry, J., Belgrader, P. et al. Massively parallel digital transcriptional profiling of single cells. Nat Commun 8, 14049 (2017). https://doi.org/10.1038/ncomms14049
+
+```{r scRNA-seq 68k PBMC dataset,  message=FALSE, warning=FALSE}
+#Import the 68k PBMC dataset
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("108QvUgEGpQxHy7qdVrZL9N2lZ8qa2EcM"), path = temp, overwrite = TRUE)
+pbmc <- readRDS(file = dl$local_path)
+
+# Remove cells with high expression of mitochondrial genes and normalize the data
+pbmc[["percent.mt"]] <- PercentageFeatureSet(pbmc, pattern = "^MT-")
+pbmc <- NormalizeData(pbmc, normalization.method = "LogNormalize", scale.factor = 10000)
+
+# Extract the ST3GAL3 expression values for all cells 
+GEX_68k<-FetchData(pbmc, "ST3GAL3")
+GEX_68k<-GEX_68k%>%tibble::rownames_to_column(.,var = "barcode")
+
+# Get the cell/ barcode annotaiton file from Zheng et al, 2017
+temp <- tempfile(fileext = ".txt")
+dl <- drive_download(
+  as_id("1-Bx0bdtlU3YKH9kuti7J9O9NrcWYCUct"), path = temp, overwrite = TRUE)
+annot <- read.table(file = dl$local_path, sep = '\t', header = TRUE, check.names = F)
+
+# Emrge the annotation file with the ST3GAl3 expression values
+anot_GEX<-merge(GEX_68k, annot, by="barcode")
+pbmc68k<-anot_GEX%>%group_by(bulk_labels)
+pbmc68k<-pbmc68k%>%group_by(bulk_labels)%>%summarise_all(funs(mean))
+pbmc68k<-pbmc68k[,-2]
+pbmc68k<-pbmc68k%>% rename(., "Blood cell"="bulk_labels")%>% rename("scRNAseq_68k"="ST3GAL3")
+```
+
+# Step 5: Harmonize blood cell names in the datasets to merge them accurately
+
+```{r change names to harmonize datasets,  message=FALSE, warning=FALSE}
+#HPA
+hpa_blood<-hpa_blood[-c(3,19),]
+hpa_blood$`Blood cell`<-as.character(hpa_blood$`Blood cell`)
+hpa_blood[hpa_blood=="memory CD4 T-cell"]<-"Memory CD4 T-cell Th1"
+hpa_blood[hpa_blood=="memory CD8 T-cell"]<-"Central memory CD8 T-cell"
+
+#Monaco
+monaco<-monaco[-c(24,27, 28,29),]
+
+#Schmiedel
+schmiedel<-schmiedel[-c(7, 10, 12), ]
+schmiedel$`Blood cell`<-as.character(schmiedel$`Blood cell`)
+schmiedel[schmiedel=="Naive T-reg"]<-"T-reg"
+
+#scRNA-seq 10k PBMC
+pbmc10k<-pbmc10k[-c(1,5,6,11,12), ]
+pbmc10k<-as.data.frame(pbmc10k)
+pbmc10k$`Blood cell`<-as.character(pbmc10k$`Blood cell`)
+pbmc10k[pbmc10k == "CD14+ Monocytes"]<-"classical monocyte"
+pbmc10k[pbmc10k == "CD4 Naive"]<-"naive CD4 T-cell"
+pbmc10k[pbmc10k == "CD4 Memory"]<-"Memory CD4 T-cell Th1"
+pbmc10k[pbmc10k == "NK cell"]<-"NK-cell"
+pbmc10k[pbmc10k == "CD8 effector"]<-"Effector memory CD8 T-cell"
+pbmc10k[pbmc10k == "CD8 Naive"]<-"naive CD8 T-cell"
+pbmc10k[pbmc10k == "pDC"]<-"plasmacytoid DC"
+
+#scRNA-seq 68K PBMC
+pbmc68k<-as.data.frame(pbmc68k)
+pbmc68k$`Blood cell`<-as.character(pbmc68k$`Blood cell`)
+pbmc68k[pbmc68k == "CD14+ Monocyte"]<-"classical monocyte"
+pbmc68k[pbmc68k == "CD19+ B"]<-"naive B-cell"
+pbmc68k[pbmc68k == "CD4+ T Helper2"]<-"Memory CD4 T-cell Th2"
+pbmc68k[pbmc68k == "CD4+/CD25 T Reg"]<-"T-reg"
+pbmc68k[pbmc68k == "CD4+/CD45RA+/CD25- Naive T"]<-"naive CD4 T-cell"
+pbmc68k[pbmc68k == "CD4+/CD45RO+ Memory"]<-"Memory CD4 T-cell Th1"
+pbmc68k[pbmc68k == "CD56+ NK"]<-"NK-cell"
+pbmc68k[pbmc68k == "CD8+ Cytotoxic T"]<-"Effector memory CD8 T-cell"
+pbmc68k[pbmc68k == "CD8+/CD45RA+ Naive Cytotoxic"]<-"naive CD8 T-cell"
+pbmc68k[pbmc68k == "Dendritic"]<-"plasmacytoid DC"
+```
+
+# Step 6: Merge the datasets together
+
+```{r merge datasets,  message=FALSE, warning=FALSE}
+a<-merge(monaco, hpa_blood, by="Blood cell", all=T, suffixes = c("_Monaco", "_HPA"))
+a<-a[, -c(2,4)]
+b<-merge(a,schmiedel, by="Blood cell", all =T, suffixes = c("", "schmiedel"))
+b<-b%>%dplyr::rename(., "Schmiedel"= "TPM")
+b<-b[,-4]
+c<-merge(b, pbmc10k, by="Blood cell", all=T)
+alldat<-merge(c, pbmc68k, by="Blood cell", all = T)
+```
+
+# Step 7: Arrange the blood cells in the order they will be shown in the heatmap and modify names
+
+```{r final clean up,  message=FALSE, warning=FALSE}
+alldat<-alldat %>% arrange(factor(`Blood cell`, levels = c("basophil", "neutrophil","classical monocyte","intermediate monocyte",  "non-classical monocyte", "NK-cell", "myeloid DC", "plasmacytoid DC", "MAIT T-cell", "B cell progenitor", "naive B-cell", "Non-switched memory B-cell", "Switched memory B-cell", "Exhausted memory B-cell", "Plasmablast", "naive CD4 T-cell", "Memory CD4 T-cell TFH", "Memory CD4 T-cell Th1", "Memory CD4 T-cell Th1/Th17", "Memory CD4 T-cell Th17", "Memory CD4 T-cell Th2", "naive CD8 T-cell", "Central memory CD8 T-cell", "Effector memory CD8 T-cell", "T-reg", "Vd2 gdTCR", "Non-Vd2 gdTCR")))
+alldat<-alldat[-c(28:30),]
+
+#Rename the cell types
+alldat$`Blood cell`<-as.character(alldat$`Blood cell`)
+alldat[alldat == "basophil"]<-"Basophil"
+alldat[alldat == "neutrophil"]<-"Neutrophil"
+alldat[alldat == "classical monocyte"]<-"Classical monocyte"
+alldat[alldat == "intermediate monocyte"]<-"Intermediate monocyte"
+alldat[alldat == "non-classical monocyte"]<-"Non-classical monocyte"
+alldat[alldat == "NK-cell"]<-"NK cell"
+alldat[alldat == "myeloid DC"]<-"Myeloid DC"
+alldat[alldat == "plasmacytoid DC"]<-"plasmacytoid DC"
+alldat[alldat == "MAIT T-cell"]<-"MAIT T cell"
+alldat[alldat == "B cell progenitor"]<-"B cell progenitor"
+alldat[alldat == "naive B-cell"]<-"Naive B cell"
+alldat[alldat == "Non-switched memory B-cell"]<-"Non-switched memory B cel"
+alldat[alldat == "Switched memory B-cell"]<-"Switched memory B cell"
+alldat[alldat == "Exhausted memory B-cell"]<-"Exhausted memory B cell"
+alldat[alldat == "Plasmablast"]<-"Plasmablasts"
+alldat[alldat == "naive CD4 T-cell"]<-"Naive CD4 T cell"
+alldat[alldat == "Memory CD4 T-cell TFH"]<-"Memory CD4 T cell: TFH"
+alldat[alldat == "Memory CD4 T-cell Th1"]<-"Memory CD4 T cell: Th1"
+alldat[alldat == "Memory CD4 T-cell Th1/Th17"]<-"Memory CD4 T cell: Th1/Th17"
+alldat[alldat == "Memory CD4 T-cell Th17"]<-"Memory CD4 T cell: Th17"
+alldat[alldat == "Memory CD4 T-cell Th2"]<-"Memory CD4 T cell: Th2"
+alldat[alldat == "naive CD8 T-cell"]<-"Naive CD8 T cell"
+alldat[alldat == "Central memory CD8 T-cell"]<-"Central memory CD8 T cell"
+alldat[alldat == "Effector memory CD8 T-cell"]<-"Effector memory CD8 T cell"
+alldat[alldat == "T-reg"]<-"Regulatory T cells"
+alldat[alldat == "Vd2 gdTCR"]<-"Vδ2 γδTCR"
+alldat[alldat == "Non-Vd2 gdTCR"]<-"Non-δ2 γδTCR"
+
+# create rownames 
+row.names(alldat)<-alldat[,1]
+alldat<-alldat[,-1]
+
+# Rename the columns
+alldat<-alldat %>% 
+  dplyr::rename("Monaco flow-sorted bulk RNA-seq PBMCs"="pTPM_Monaco")%>%
+  dplyr::rename("HPA flow-sorted bulk RNA-seq PBMCs"="pTPM_HPA")%>%
+  dplyr::rename("Schmiedel flow-sorted bulk RNA-seq PBMCs"="Schmiedel")%>%
+  dplyr::rename("10X Genomics unsorted scRNA-seq PBMCs (10K)"="scRNAseq_10k")%>%
+  dplyr::rename("10X Genomics unsorted scRNA-seq PBMCs (68K)"="scRNAseq_68k")
+  
+# reorder the columns
+alldat <- alldat[, c(5, 4, 2, 3, 1)]
+```
+
+# Step 8: Make the heatmap (Figure 4J in preprint)
+
+```{r make heatmaps,  message=FALSE, warning=FALSE}
+# Scale the data
+alldat <- scale(alldat)
+
+myHeatmap <- Heatmap(alldat,
+                     row_names_gp = gpar(fontsize = 6),
+                     column_names_gp = gpar(fontsize = 6),
+                     cluster_rows = F,
+                     cluster_columns =F,
+                     na_col = "grey",
+                     heatmap_legend_param = list(title = "z-score", direction = "horizontal", title_position = "topcenter"))
+
+print(myHeatmap)
+```
+
+# Step 9: Save to google drive
+
+```{r save the pdf to google drive, message=FALSE, warning=FALSE }
+cairo_pdf("ComplexHeatmap_ST3GAL3_expression_blood_cell_populations_55x2.pdf", width = 5.5, height =8)
+print(myHeatmap)
+dev.off()
+drive_upload("ComplexHeatmap_ST3GAL3_expression_blood_cell_populations_55x8.pdf", path="~/ComplexHeatmap_ST3GAL3_expression_blood_cell_populations_55x8.pdf")
+```
+

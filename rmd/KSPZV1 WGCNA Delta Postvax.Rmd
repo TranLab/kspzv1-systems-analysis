@@ -1,0 +1,319 @@
+---
+title: "KSPZV1 WGCNA Delta Postvax"
+author: "Tuan M. Tran"
+date: "09/13/2021"
+output: html_document
+---
+
+### Objective
+
+Perform weighted gene correlation network analysis as originally described by Horvath et al. on delta (postvax/baseline) transcriptomic data from the KSPZV1 clinical trial.
+
+References:
+
+https://horvath.genetics.ucla.edu/html/CoexpressionNetwork/Rpackages/WGCNA/Tutorials/
+https://horvath.genetics.ucla.edu/html/CoexpressionNetwork/JMiller/Tutorial%20document.pdf
+
+### Load packages
+
+```{r load packages, message=FALSE, warning=FALSE}
+library(edgeR)
+library(readxl)
+library(EDASeq)
+library(Biobase)
+library(WGCNA)
+library(ape)
+library(Cairo)
+library(CorLevelPlot)
+library(tidyverse)
+library(igraph)
+library(remotes)
+library(fgsea)
+library(data.table)
+library(ggplot2)
+library(viridis)
+library(ggpubr)
+library(googledrive)
+allowWGCNAThreads()
+```
+
+### Options and define variables
+
+```{r options and define variables, warning=FALSE, message=FALSE}
+myCor <- "cor"
+power <- 11.5
+myMergeCutHeight <- 0.05 
+myDeepSplit <- 2 
+minModSize <- 20 
+enforceMMS <- FALSE
+cor.pval <- 0.05
+```
+
+### Load ExpressionSet
+
+```{r load cpm eset, warning=FALSE, message=FALSE}
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("17xx0YaggLiyWdJc9rqA1nkPSE7dj05p0"), path = temp, overwrite = TRUE)
+x <- readRDS(file = dl$local_path)
+dim(x)
+```
+
+### Make weighted gene correlation matrix based on full data set
+
+```{r weighted gene correlation matrix based on full data set, message=FALSE, warning=FALSE}
+WGCNA_matrix <- t(exprs(x))
+blockSize(ncol(WGCNA_matrix), rectangularBlocks = TRUE, maxMemoryAllocation = 4^31)
+par(mfrow=c(1,1))
+plotClusterTreeSamples(datExpr=WGCNA_matrix)
+powers <- seq(4,20,by=0.5)
+sft <- pickSoftThreshold(WGCNA_matrix, powerVector = powers, corFnc = myCor, verbose = 5, networkType ="signed", blockSize = ncol(WGCNA_matrix))
+sft$powerEstimate
+par(mfrow=c(1,1))
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab='Soft Threshold (power)',ylab='Scale Free Topology Model Fit,signed R²',
+     type='n', main = paste('Scale independence'));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=1,col='red'); abline(h=0.90,col='red')
+```
+
+### Run an automated network analysis
+
+```{r calculation of adjacency matrix, message=FALSE, warning=FALSE}
+net <- blockwiseModules(WGCNA_matrix,
+                        power=power,
+                        deepSplit=myDeepSplit,
+                        minModuleSize=minModSize,
+                        TOMType="none", 
+                        mergeCutHeight=myMergeCutHeight,
+                        TOMDenom="mean",
+                        detectCutHeight=0.995,
+                        corType="pearson",
+                        networkType="signed",
+                        pamStage=TRUE,
+                        pamRespectsDendro=TRUE,
+                        reassignThresh=0.05,
+                        verbose=5,
+                        saveTOMs=FALSE,
+                        maxBlockSize=ncol(WGCNA_matrix),
+                        nThreads = 0)
+
+# Summary Module Table
+nModules <- length(table(net$colors))-1
+modules <- cbind(colnames(as.matrix(table(net$colors))),table(net$colors))
+orderedModules <- cbind(Mnum=paste("M",seq(1:nModules),sep=""),Color=labels2colors(c(1:nModules)))
+modules <- modules[match(as.character(orderedModules[,2]),rownames(modules)),]
+tmpMEs <- MEs <- net$MEs
+colnames(tmpMEs) <- paste("ME",colnames(MEs),sep="")
+kMEdat <- signedKME(WGCNA_matrix, tmpMEs, corFnc=myCor) #calculate (signed) eigengene-based connectivity, also known as module membership
+WGCNA_dat <- cbind(fData(x)$GeneSymbol, colnames(WGCNA_matrix),net$colors,kMEdat) %>%
+  as.data.frame() %>%
+  dplyr::rename(GeneSymbol = "fData(x)$GeneSymbol") %>%
+  dplyr::rename(ENSEMBLID = "colnames(WGCNA_matrix)") %>%
+  dplyr::rename(ModuleColors = "net$colors")
+```
+
+### Correlate modules with traits
+
+```{r correlate modules with traits, message=FALSE, warning=FALSE}
+# Define numbers of genes and samples
+nGenes = ncol(WGCNA_matrix)
+nSamples = nrow(WGCNA_matrix)
+
+datvar <- pData(x) %>%
+  dplyr::select(PATID, SEQBATCH, site, SEX, age.vax1, mal.vax.1, treat, mal.atp.3, tte.mal.atp.6, mal.dvax, mal.dvax.tot, pfcsp_pre, pfcsp_post, log2FC_CSPAb) %>%
+  mutate('Gender (female)' = factor(ifelse(SEX == "F", 1, 0))) %>%
+  mutate('Site (Siaya)' = factor(ifelse(site == "Siaya", 1, 0))) %>%
+  dplyr::rename('Pf infection at first vax' = "mal.vax.1") %>%
+  mutate('pre-vax anti-CSP IgG' = log2(pfcsp_pre+1)) %>%
+  dplyr::rename('log2FC anti-CSP IgG' = "log2FC_CSPAb") %>%
+  mutate('1.8 x 10^6 PfSPZ' = factor(ifelse(treat == "1.8 x 10^6 PfSPZ", 1, 0))) %>%
+  mutate('parasitemic events during vax period' = mal.dvax.tot) %>%
+  mutate('uninfected, 3 months' = factor(ifelse(mal.atp.3 == 0, 1, 0))) %>%
+  dplyr::rename('days to first parasitemia' = "tte.mal.atp.6") %>%
+  mutate(Age = age.vax1) %>%
+  dplyr::select(PATID, Age, 'pre-vax anti-CSP IgG', 'parasitemic events during vax period', 'uninfected, 3 months', 'days to first parasitemia', 'log2FC anti-CSP IgG') %>% #delta
+  as_tibble() %>%
+  column_to_rownames(var = "PATID") %>%
+  mutate_if(is.factor, as.character) %>%
+  mutate_if(is.character, as.numeric)
+
+modTraitCor <- cor(orderMEs(net$MEs), datvar, use = "p")
+modTraitP <- corPvalueStudent(modTraitCor, nSamples)
+#Since we have a moderately large number of modules and traits, a suitable graphical representation will help in reading the table. We color code each association by the correlation value: Will display correlations and their p-values
+
+#Select out only modules that have P<0.05 in Protection
+modTraitP.temp <- modTraitP %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "Module") %>%
+  filter(.$'uninfected, 3 months' < cor.pval | .$'days to first parasitemia' < cor.pval)
+modTraitCor.select <- modTraitCor[modTraitP.temp$Module,]
+modTraitP.select <- modTraitP[modTraitP.temp$Module,]
+textMatrix <- paste(signif(modTraitCor.select, 2), "\n(P=",
+                   signif(modTraitP.select, 1), ")", sep = "")
+dim(textMatrix) <- dim(modTraitCor.select)
+```
+
+### Display the correlation values within a heatmap plot (Figure 4E of pre-print)
+
+```{r plot module trait correlations heatmap, warning=FALSE, message=FALSE, fig.align='center', fig.width=8, fig.height=8}
+par(mar = c(11, 9, 1, 1))
+labeledHeatmap(Matrix = modTraitCor.select, xLabels = names(datvar),
+               yLabels = rownames(modTraitCor.select), ySymbols = rownames(modTraitCor.select),
+               colorLabels =FALSE,colors=blueWhiteRed(100),textMatrix=textMatrix,
+               setStdMargins = FALSE, zlim = c(-1,1),
+               main = paste("Module-trait relationships"),xLabelsAngle = 45) 
+```
+
+### Identify hub genes
+
+```{r id hub genes, warning=FALSE, message=FALSE}
+myColors <- gsub("ME", "", rownames(modTraitCor.select))
+topmodules <- chooseTopHubInEachModule(WGCNA_matrix, net$colors, omitColors = "grey", power = 12.5, type ="signed")
+mytopmodules <- topmodules[myColors] %>%
+  as.data.frame() %>%
+  dplyr::rename(EnsemblID = ".") %>%
+  rownames_to_column("module_label") %>%
+  as_tibble() %>%
+  left_join(., fData(x) %>%
+              dplyr::select(EnsemblID, GeneSymbol), by = "EnsemblID")
+devtools::source_url("https://github.com/jtlovell/limmaDE2/blob/master/R/wgcna2igraph.R?raw=TRUE")
+graph <- wgcna2igraph(net = net, WGCNA_matrix, modules2plot = myColors,
+                      colors2plot = myColors,
+                      kME.threshold = 0.5, adjacency.threshold = 0.1,
+                      adj.power = power, verbose = T,
+                      node.size = 1, frame.color = NA, node.color = scales::muted("red"),
+                      edge.alpha = .7, edge.width = 0.5)
+hubscores <- hub_score(graph, scale = TRUE, weights = NULL,
+  options = arpack_defaults)
+```
+
+### Top modules and hub genes (rownames for Figure 4E of pre-print)
+
+```{r display my topmodules, echo=FALSE}
+knitr::kable(mytopmodules)
+```
+
+### Plot network graph of significant modules (Figure 4F of pre-print)
+
+Network graphs of significant modules containing nodes (red dots) and edges (lines) meeting minimum thresholds. Correlations between nodes in different modules are shown as black edges.
+
+```{r plot networkd graph, message=FALSE, warning=FALSE, fig.align='center', fig.width=8, fig.height=8, echo=FALSE}
+plot(graph)
+```
+
+### Identify modules with < 0.05
+
+List number of genes per module
+
+```{r id modules that are significant than pull out gene list, warning=FALSE, message=FALSE}
+WGCNA_dat_select <- c()
+for(i in modTraitP.temp$Module){
+  module.color <- sub("ME","", i)
+  module.colname <- paste0("kME", i)
+  WGCNA_dat_select[[i]] <- WGCNA_dat %>% 
+    filter(ModuleColors == module.color) %>%
+    dplyr::select(GeneSymbol, all_of(module.colname))
+}
+lapply(WGCNA_dat_select, nrow)
+```
+
+### FGSEA on WGCNA Results
+
+rank by module membership
+
+```{r FGSEA on WGCNA Results, warning=FALSE, message=FALSE}
+minSize <- 5
+# Make rank list; ranked by ModuleMembership correlation
+  ranks <- GSEA_baseline_bound_df <- c()
+devtools::source_url("https://github.com/TranLab/ModuleLists/blob/main/NamedGeneRankList2GseaTable.R?raw=TRUE")
+for(k in names(WGCNA_dat_select)){
+  WGCNA_dat_select[[k]] <- WGCNA_dat_select[[k]][order(WGCNA_dat_select[[k]][,2], decreasing = TRUE),]
+  ranks[[k]] <- WGCNA_dat_select[[k]][,2]
+  names(ranks[[k]]) <- WGCNA_dat_select[[k]]$GeneSymbol
+  GSEA_baseline_bound_df[[k]] <- NamedGeneRankList2GseaTable(rankedgenes = ranks[[k]], geneset = "all", output_directory = tempdir(),
+                                                        filename_prefix = paste0("FGSEA_Mod_Corr_Protect_3_mos_", k,
+                                                                                 "_minSize", minSize), scoreType = "pos", minSize = minSize, fixed_seed = TRUE)
+  }
+```
+
+###  Results
+
+delta analysis
+
+```{r prepare data wgcna gsea, warning=FALSE, message=FALSE}
+myModuleTypes <- c("MSigDB_Hallmark_v7.4", "MSigDB_C2_kegg_v7.4", "highBTMs", "lowBTMs", "MonacoModules", "BloodGen3Module")
+myGSEAClusterPlotDat <- GSEA_baseline_bound_df$MElightgreen %>%
+  mutate(module_hub = "CD22") %>%
+  bind_rows(., GSEA_baseline_bound_df$MEpaleturquoise %>%
+              mutate(module_hub = "BTLA") ) %>%
+  bind_rows(., GSEA_baseline_bound_df$MElightblue4 %>%
+                mutate(module_hub = "NKG2-E")) %>%
+  bind_rows(., GSEA_baseline_bound_df$MEcoral4 %>%
+              mutate(module_hub = "KDM5D")) %>%
+  bind_rows(., GSEA_baseline_bound_df$MEsalmon2 %>%
+              mutate(module_hub = "TRIP12")) %>%
+  bind_rows(., GSEA_baseline_bound_df$MEbrown4 %>%
+              mutate(module_hub = "SEC62")) %>%
+  bind_rows(., GSEA_baseline_bound_df$MEmidnightblue %>%
+              mutate(module_hub = "RIOK3")) %>%
+  mutate(neglogpadj = -log10(padj)) %>%
+  mutate(module_hub = gsub("2-E", "2E", module_hub)) %>%
+  mutate(pathway = gsub("VS", "v", pathway)) %>%
+  mutate(pathway = gsub("Vd", "Vδ", pathway)) %>%
+  mutate(pathway = gsub("gd", "γδ", pathway)) %>%
+  mutate(pathway = sub(".*?\\_", "", pathway)) %>%
+  mutate(pathway = fct_reorder(pathway, NES, .desc = TRUE))  %>%
+  dplyr::arrange(desc(NES)) %>%
+  mutate(TextLabelColor = ifelse(module_type == "lowBTMs", scales::muted("red"),
+                                 ifelse(module_type == "highBTMs", scales::muted("blue"),
+                                        ifelse(module_type == "BloodGen3Module", "orange",
+                                               ifelse(module_type == "MonacoModules", "black",
+                                                      ifelse(module_type == "highBTMs", scales::muted("blue"), 
+                                                             ifelse(module_type == "MSigDB_C2_kegg_v7.4", scales::muted("green"),
+                                                                    ifelse(module_type == "MSigDB_C2_kegg_v7.4", scales::muted("purple"), "gray")))))))) %>%
+  filter(padj < 0.20) %>%
+  filter(module_type %in% myModuleTypes) %>%
+  droplevels()
+```
+
+### GSEA Bubble plot (Figure S5B in pre-print)
+
+Gene set enrichment analysis of genes ranked by membership within indicated modules which were determined by
+weight gene correlation network analysis (WGCNA) of whole-blood Δ transcriptomes.
+
+```{r prepare , warning=FALSE, message=FALSE, fig.width=6, fig.height=6}
+addSmallLegend <- function(myPlot, pointSize = 2.5, textSize = 4, spaceLegend = 0.5) {
+    myPlot +
+        guides(shape = guide_legend(override.aes = list(size = pointSize)),
+               color = guide_legend(override.aes = list(size = pointSize))) +
+        theme(legend.title = element_text(size = textSize), 
+              legend.text  = element_text(size = textSize),
+              legend.key.size = unit(spaceLegend, "lines"))
+}
+
+myfont <- "Helvetica"
+bubble_max_size <- 6
+basetextsize <- 8
+colorlabels <- myGSEAClusterPlotDat$TextLabelColor
+myGSEAClusterPlot <- myGSEAClusterPlotDat %>%
+  ggplot(., aes(x = module_hub, y = pathway)) +
+  geom_point(aes(size=neglogpadj, fill = NES), alpha = 0.65, shape=21, stroke = 0.25) +
+  scale_size_area(name = expression(-log[10]~adj.~p~value), max_size = bubble_max_size) +
+  viridis::scale_fill_viridis(option= "A", begin = 0.25, end = 0.75, alpha = 0.8, direction = -1, name = "NES") +
+  hrbrthemes::theme_ipsum_es(base_family = myfont, base_size = basetextsize) +
+  scale_x_discrete(limits=rev) +
+  scale_y_discrete(position = "right") +
+  ylab("pathway/module") +
+  xlab("WGCNA hub gene") +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90, vjust = 1, hjust=0)) +
+  coord_flip()
+```
+
+
+```{r plot delta bubble, fig.align='center', fig.height=5, fig.width=6, echo=FALSE}
+# Apply on original plot
+addSmallLegend(myGSEAClusterPlot)
+```
+
