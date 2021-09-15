@@ -5,7 +5,7 @@ date: "09/14/2021"
 output: html_document
 ---
 
-```{r libraries, include=FALSE}
+```{r libraries, message=FALSE, warning=FALSE}
 library(knitr)
 library(tidyverse)
 library(edgeR)
@@ -264,7 +264,7 @@ BottomPlot <- plotDat %>%
 facet_wrap(~module_type, scales = "free_x")
 ```
 
-### Plot GSEA bubbleplots
+### Plot GSEA bubbleplots (Figures 2D and S3 of pre-print)
 
 Red: enriched in protected/uninfected through 3 months post-vax surveillance
 Blue: enriched in not protected/infected through 3 months post-vax surveillance
