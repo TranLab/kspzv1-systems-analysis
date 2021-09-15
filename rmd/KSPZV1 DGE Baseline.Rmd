@@ -1,0 +1,288 @@
+---
+title: "KSPZV1 DGE pre-immunization baseline"
+author: "Tuan M. Tran"
+date: "09/14/2021"
+output: html_document
+---
+
+```{r libraries, include=FALSE}
+library(knitr)
+library(tidyverse)
+library(edgeR)
+library(googledrive)
+library(tidyverse)
+library(fgsea)
+library(data.table)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Objective
+
+Perform differential gene expression using edgeR on pre-immunization baseline whole-blood samples from the KSPZV1 malaria vaccine trial.
+
+### Load ExpressionSet
+
+```{r load SeqExpressionSet 2, message=FALSE, warning=FALSE}
+#from google drive
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("1Q4VXYxdl9CqtzhcvHA9pn8q06_YOZgi8"), path = temp, overwrite = TRUE)
+x <- readRDS(file = dl$local_path)
+x$treat <- factor(x$treat, levels = c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+```
+
+### Set options
+
+```{r set options, message=FALSE, warning=FALSE}
+myGroups <- unique(x$treat)
+myTimepoint <- 0
+```
+
+### Reduce samples
+
+```{r reduced data, message=FALSE, warning=FALSE}
+xgroup <- setNames(as.list(c(1:4)), c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+for(i in names(xgroup)){
+  xgroup[[i]] <- x[, which(x$treat == i)]
+  xgroup[[i]] <- xgroup[[i]][,xgroup[[i]]$Timepoint == 0]
+  xgroup[[i]]$treat <- droplevels(xgroup[[i]]$treat)
+  print(i)
+  print(table(Outcome = xgroup[[i]]$Outcome, Timepoint = xgroup[[i]]$Timepoint))
+  print(table(Outcome = xgroup[[i]]$Outcome, Dosegroup = xgroup[[i]]$treat))
+  print(dim(xgroup[[i]]))
+}
+```
+
+### Build DGEList Object and make Expression Sets
+
+```{r make DGEList object, message=FALSE, warning=FALSE}
+#Define group by dose, timepoint and outcome
+ygroup <- setNames(as.list(c(1:4)), c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+for(i in names(ygroup)){
+  ygroup[[i]]  <- DGEList(counts=counts(xgroup[[i]]), genes=fData(xgroup[[i]]), group= factor(paste(xgroup[[i]]$treat, xgroup[[i]]$Timepoint, xgroup[[i]]$Outcome, sep = "_")), remove.zeros=T)
+  ygroup[[i]]$samples$PATID <- gsub("_.*", "", rownames(ygroup[[i]]$samples))
+}
+```
+
+### Filter out low expression features
+
+```{r low expression filters, message=FALSE, warning=FALSE}
+for(i in names(ygroup)){
+  keep <- filterByExpr(ygroup[[i]])
+  ygroup[[i]] <- ygroup[[i]][keep, , keep.lib.sizes=FALSE]
+  ygroup[[i]]$samples$lib.size <- colSums(ygroup[[i]]$counts)
+  ygroup[[i]] <- calcNormFactors(ygroup[[i]])	#Normalization
+}
+```
+
+### Design Matrix - Compare Protected (0) vs Susceptible (1)
+
+Create design matrix according to EdgeR user guide (Ch 3.5 Comparisons Both Between and Within Subjects)  
+Note that "intergenic_adj" should only be used if you use seq data that HAS NOT been SeqMonk corrected. Choose no_adj when using SeqMonk corrected data.
+
+### Analysis between Not Protected and Protected within a Dose Group
+
+
+```{r, build design matrix afs protected vs susceptible by group, message=FALSE, warning=FALSE}
+degtab <- setNames(as.list(c(1:4)), c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+for(i in names(ygroup)){
+  Subject <- factor(xgroup[[i]]$PATID)
+  Outcome <- factor(xgroup[[i]]$Outcome, levels = c(1,0), labels = c("NotProtected","Protected"))
+  Timepoint <- factor(xgroup[[i]]$Timepoint, levels = c(0,25), labels = c("baseline","postvax"))
+  Batch <- factor(xgroup[[i]]$SEQBATCH, levels = c("Aug2019","Nov2019"))
+  Age <- xgroup[[i]]$age.vax1
+  Sex <- as.factor(xgroup[[i]]$SEX)
+  #data.frame(Outcome, Subject, Sex, Timepoint, Batch)
+  #This is the final Timepoint 0 analysis.
+  design <- model.matrix(~Batch + Outcome)
+  #colnames(design)
+  rownames(design) <- ygroup[[i]]$samples$PATID
+  ygroup[[i]]     <- estimateDisp(ygroup[[i]],design, robust = TRUE)
+  fit   <- glmQLFit(ygroup[[i]], design, robust = TRUE)
+  qlf <- glmQLFTest(fit, contrast = c(0,0,1))
+  degtab[[i]] <- topTags(qlf, n = nrow(ygroup[[i]]))$table
+}
+
+temp <- degtab
+for(i in names(degtab)){
+  temp[[i]] <- degtab[[i]] %>%
+    dplyr::select(7,8,10:14) %>%
+    head(.,15)
+  }
+```
+
+### Examine top 15 DEGs (protected vs not protected)
+
+Placebo 
+
+```{r DEG table placebo, echo = FALSE}
+knitr::kable(temp$Placebo)
+```
+
+4.5 x 10^5 PfSPZ 
+
+```{r DEG table low dose, echo = FALSE}
+knitr::kable(temp$`4.5 x 10^5 PfSPZ`)
+```
+
+9.0 x 10^5 PfSPZ 
+
+```{r DEG table med dose, echo = FALSE}
+knitr::kable(temp$`9.0 x 10^5 PfSPZ`)
+```
+
+1.8 x 10^6 PfSPZ 
+
+```{r DEG table high dose, echo = FALSE}
+knitr::kable(temp$`1.8 x 10^6 PfSPZ`)
+```
+
+### Apply GSEA
+
+Rank genes by -log10(PValue)*sign(logFC). Run fgsea from fgsea package using NamedGeneRankList2GseaTable helper function.
+
+```{r apply fgsea, warning=FALSE, message=FALSE}
+set.seed(23)
+ranks <- degtab
+for(i in names(degtab)){
+  ranks[[i]] <- degtab[[i]] %>% 
+  mutate(rankmetric = -log10(.$PValue)*sign(.$logFC)) %>%
+  dplyr::select(GeneSymbol,rankmetric) %>% 
+  na.omit() %>% 
+  distinct() %>% 
+  group_by(GeneSymbol) %>%  
+  summarize(rankmetric = mean(rankmetric)) %>%
+  arrange(desc(rankmetric)) %>%
+  deframe()
+}
+#Run fgsea from fgsea package using NamedGeneRankList2GseaTable helper function
+devtools::source_url("https://github.com/TranLab/ModuleLists/blob/main/NamedGeneRankList2GseaTable.R?raw=TRUE")
+GSEAtab <- ranks
+for(i in names(ranks)){
+  GSEAtab[[i]] <- NamedGeneRankList2GseaTable(rankedgenes = ranks[[i]],
+                                         geneset = "all",
+                                         output_directory = tempdir(),
+                                         filename_prefix = "GSEA",
+                                         sampleSize = 101,
+                                         minSize = 20,
+                                         maxSize = Inf,
+                                         scoreType = "std") %>%
+    as_tibble() %>%
+    arrange(desc(NES)) %>% 
+    dplyr::select(module_type, pathway, ES, NES, size, leadingEdge, pval, padj) %>% 
+    mutate(leadingEdge = gsub("^c\\(|\\)$", "", leadingEdge)) %>%
+    mutate(leadingEdge = gsub('"', "", leadingEdge)) %>%
+    arrange(padj)
+}
+# These are the genes with duplicated rankmetrics...can ignore warning about ties b/c it's trivial (only involves two genes)
+# 1 RP11-521C22.3    -0.0303
+# 2 AC069547.1       -0.0303
+```
+
+### Visualize GSEA data as bubble plot
+
+Filter based on padj < 0.20.
+
+```{r visualize GSEA data, message=FALSE, warning=FALSE}
+plotDat <- GSEAtab %>%
+  bind_rows(., .id = "dosegroup") %>%
+  mutate(dosegroup = factor(dosegroup, levels = c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))) %>%
+  filter(padj < 0.20) %>%
+  filter(module_type %in% c("highBTMs", "lowBTMs", "MonacoModules", "BloodGen3Module", "MSigDB_Hallmark_v7.4"))  %>%
+  filter(!grepl("TBA", pathway)) %>%
+  dplyr::select(dosegroup, module_type, pathway, leadingEdge, size, NES, padj) %>%
+  mutate(neglogpadj = -log10(padj)) %>%
+  mutate(pathway = gsub("gd", "γδ", pathway)) %>%
+  mutate(pathway = gsub("Vd2", "Vδ2", pathway)) %>%
+  mutate(pathway = gsub("Vg", "Vγ", pathway)) %>%
+  mutate(pathway = gsub("HALLMARK_", "", pathway)) %>%
+  mutate(pathway = gsub("_", " ", pathway)) %>%
+  mutate(pathway = sub(".*?\\_", "", pathway)) %>%
+  group_by(module_type, dosegroup) %>%
+  mutate(pathway = fct_reorder(pathway, NES, .desc = TRUE)) %>%
+  ungroup() %>%
+  mutate(dosegroup = fct_rev(dosegroup)) %>%
+  filter(!grepl("TBD", pathway)) %>%
+  mutate(module_type = factor(module_type, levels = c("highBTMs", "MonacoModules", "lowBTMs", "MSigDB_Hallmark_v7.4", "BloodGen3Module"))) %>%
+  arrange(desc(neglogpadj)) %>% 
+  droplevels()
+
+#plotting options
+basetextsize <- 8  
+myfont <- "sans"
+bubble_max_size <- 6
+
+TopPlot <- plotDat %>%
+  filter(module_type %in% c("highBTMs", "MonacoModules"))  %>%
+  ggplot(., aes(x = pathway, y = dosegroup)) +
+  geom_point(aes(size=neglogpadj, fill = NES), alpha = 0.65, shape=21, stroke = 0.25) +
+  scale_size_area(name = expression(-log[10]~adj.~p~value), max_size = bubble_max_size) +
+      scale_fill_gradient2(low = "blue",
+                           mid = "white",
+                           high = "red") +
+  hrbrthemes::theme_ipsum_es(base_family = myfont, base_size = basetextsize) +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+facet_wrap(~module_type, scales = "free_x")
+
+MidPlot <- plotDat %>%
+  filter(module_type %in% c("lowBTMs", "MSigDB_Hallmark_v7.4"))  %>%
+  ggplot(., aes(x = pathway, y = dosegroup)) +
+  geom_point(aes(size=neglogpadj, fill = NES), alpha = 0.65, shape=21, stroke = 0.25) +
+  scale_size_area(name = expression(-log[10]~adj.~p~value), max_size = bubble_max_size) +
+      scale_fill_gradient2(low = "blue",
+                           mid = "white",
+                           high = "red") +
+  hrbrthemes::theme_ipsum_es(base_family = myfont, base_size = basetextsize) +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+facet_wrap(~module_type, scales = "free_x")
+
+BottomPlot <- plotDat %>%
+  filter(module_type %in% c("BloodGen3Module"))  %>%
+  ggplot(., aes(x = pathway, y = dosegroup)) +
+  geom_point(aes(size=neglogpadj, fill = NES), alpha = 0.65, shape=21, stroke = 0.25) +
+  scale_size_area(name = expression(-log[10]~adj.~p~value), max_size = bubble_max_size) +
+      scale_fill_gradient2(low = "blue",
+                           mid = "white",
+                           high = "red") +
+  hrbrthemes::theme_ipsum_es(base_family = myfont, base_size = basetextsize) +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+facet_wrap(~module_type, scales = "free_x")
+```
+
+### Plot GSEA bubbleplots
+
+Red: enriched in protected/uninfected through 3 months post-vax surveillance
+Blue: enriched in not protected/infected through 3 months post-vax surveillance
+
+```{r plot gsea bubbleplot, fig.align='center', fig.width=12, fig.height=5, echo=FALSE, message=FALSE, warning=FALSE}
+print(TopPlot)
+```
+
+```{r plot gsea bubbleplot 2, fig.align='center', fig.width=12, fig.height=6, echo=FALSE, message=FALSE, warning=FALSE}
+print(MidPlot)
+```
+
+```{r plot gsea bubbleplot 3, fig.align='center', fig.width=12, fig.height=5, echo=FALSE, message=FALSE, warning=FALSE}
+print(BottomPlot)
+```
+
+
+
+
+
+

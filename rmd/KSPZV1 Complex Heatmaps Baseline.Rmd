@@ -1,5 +1,5 @@
 ---
-title: "PfSPZ Complex Heatmaps Baseline"
+title: "KSPZV1 Complex Heatmaps Baseline"
 author: "Tuan M. Tran"
 date: "09/08/2021"
 output: html_document
