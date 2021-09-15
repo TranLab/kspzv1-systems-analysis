@@ -247,9 +247,9 @@ print(myHeatmap)
 # Step 9: Save to google drive
 
 ```{r save the pdf to google drive, message=FALSE, warning=FALSE }
-cairo_pdf("ComplexHeatmap_ST3GAL3_expression_blood_cell_populations_55x2.pdf", width = 5.5, height =8)
+cairo_pdf("ComplexHeatmap_ST3GAL3_expression_blood_cell_populations_55x8.pdf", width = 5.5, height =8)
 print(myHeatmap)
 dev.off()
-drive_upload("ComplexHeatmap_ST3GAL3_expression_blood_cell_populations_55x8.pdf", path="~/ComplexHeatmap_ST3GAL3_expression_blood_cell_populations_55x8.pdf")
+drive_upload("ComplexHeatmap_ST3GAL3_expression_blood_cell_populations_55x8.pdf")
 ```
 

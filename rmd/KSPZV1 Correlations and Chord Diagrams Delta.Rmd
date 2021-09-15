@@ -1,7 +1,7 @@
 ---
-title: "PfSPZ correlation chord diagrams: Post-vaccination"
+title: "PfSPZ correlation chord diagrams: Delta (Post-vaccination- baseline)"
 author: "Prasida Holla"
-date: "9/10/2021"
+date: "9/07/2021"
 output: html_document
 ---
 
@@ -21,13 +21,12 @@ Steps:
 6. Run correlations using ggcorrplot, which should give a table of Pearson's r values and pvalues for each correlation
 7. Convert pvalues to FDR and use it to keep only significant correlations
 8. Keeping only the top triangle of the correlation matrix, use the package 'Circlize' to visualize the correlations as a chord diagram (aka circos plot). 
-9. This script is specifically for post-vaccination features
+9. This script is specifically for delta (post-vaccination- baseline) features
 
 Notes: 
-- Cytokine levels were not included in  the correlations of post-vaccination features
+- Cytokine levels were not included in  the correlations of delta features
 
 ## Load required packages
-
 
 ```{r load libraries, include = TRUE, message=FALSE, warning=FALSE}
 library(tidyverse)
@@ -56,17 +55,17 @@ dl <- drive_download(
   as_id("10Uv9gzqZTVtyIqEmYdE9JpJUnJ8ZCPdT"), path = temp, overwrite = TRUE)
 facs <- readRDS(file = dl$local_path)
 
-#load the post-vaccination expression dataset
+#load the delta expression dataset
 temp <- tempfile(fileext = ".rds")
 dl <- drive_download(
-  as_id("10loQKUl7pQs0qxpDQv1VkCULIL9ZbawZ"), path = temp, overwrite = TRUE)
+  as_id("10uFfj5fPGyuUlMkITBH52cVXO1rpRwoo"), path = temp, overwrite = TRUE)
 eset <- readRDS(file = dl$local_path)
 ```
 
 #Keep only select columns from the phenoData of the eset (Patient ID,Sample ID, time to parasitemia at six months)
 
 ```{r filter PhenoData,  message=FALSE, warning=FALSE}
-positions<-c(1, 2, 3, 8, 12)
+positions<-c(1, 2, 7, 11)
 pData(eset)<-  pData(eset)%>%
 dplyr::select(positions)
 ```
@@ -173,21 +172,35 @@ dplyr::select(!contains("ICS_IL-1ß_pct_of_live_monocytes")) %>%
   dplyr::select(!contains("ICS_HLA-DR_MFI_live_monocytes"))%>%
   dplyr::select(!contains("ICS_TNF_MFI_live_monocytes")) %>%
   dplyr::select(!contains("ICS_TNF_count")) 
-
-#Keep only post-vaccination values
-facs<-facs%>% filter(grepl("_25", PATID.OG))
 ```
 
+# Calculate delta non-transcriptomic features
+```{r delta facs data, message=FALSE, warning=FALSE}
+baseline<-facs%>%filter(grepl("_0", PATID.OG))
+nrow(baseline) ##337
+
+postvax<-facs%>%filter(grepl("_25", PATID.OG))
+nrow(postvax) ##337
+
+p<-postvax[,c(2:ncol(postvax))]
+b<-baseline[,c(2:ncol(baseline))]
+
+delta_facs<-p-b
+
+rownames(delta_facs)<-postvax$PATID.OG
+delta_facs<-delta_facs%>%rownames_to_column(., var="PATID_XX")
+delta_facs<-delta_facs%>% dplyr::mutate(.,"PATID.OG"=  str_replace(PATID_XX, '_.*',''))
+delta_facs<-delta_facs[, -c(1,2)]
+delta_facs <- delta_facs %>%
+  dplyr::select(PATID.OG, everything())
+```
 
 #Merge non-transcriptomic data 'alldata' into the pData of 'eset'
 
 ```{r merge phenoData with other non-transcriptomic data,  message=FALSE, warning=FALSE}
 pheno_data<-pData(eset)%>%rownames_to_column(., var="PATID.OG")
 #Merge
-alldata<-pheno_data%>%left_join(., facs, by="PATID.OG")
-
-# Remove unwanted columns
-alldata<-alldata[, -c(3,4,7)]
+alldata<-pheno_data%>%left_join(., delta_facs, by="PATID.OG")
 ```
 
 # Convert Gene expression data to BTMs for downstream analyses
@@ -196,7 +209,7 @@ alldata<-alldata[, -c(3,4,7)]
 #Step 1: Scale the data
 exprs(eset) <- exprs(eset) %>%
   t(.) %>%
-  scale(., center = TRUE, scale = TRUE) %>% 
+  scale(., center = TRUE, scale = TRUE) %>% #generating z scores using scale function
   t(.)
 
 #Step 2: Convert ENSEMBL ids to gene names
@@ -209,8 +222,8 @@ expr_data<-merge(exprs(eset), symbols, by=0)
 expr_data<-expr_data[,-1]
 expr_data<-expr_data[!duplicated(expr_data$y),]
 expr_data<-expr_data[!is.na(expr_data$y),] ## or you can run --> expr_data<-subset(expr_data, !is.na(expr_data$y))
-rownames(expr_data)<-(expr_data[,244])
-expr_data<-expr_data[,-244]
+rownames(expr_data)<-(expr_data[,231])
+expr_data<-expr_data[,-231]
 
 # Step 3: Collapse into level BTMs
 temp <- tempfile(fileext = ".xls")
@@ -220,6 +233,12 @@ btmxls <- readxl::read_excel(dl$local_path)
 
 btm <- as.list(as.character(btmxls$`Module member genes`))
 names(btm) <- btmxls$ID
+
+for(i in 1:length(btm)){
+  btm[[i]] <- gsub(" ///", ",", btm[[i]])
+  btm[[i]] <- gsub(" ", "", btm[[i]])
+  btm[[i]] <- unlist(strsplit(btm[[i]], "," ))
+}
 
 # import the hilevel BTM table 
 temp <- tempfile(fileext = ".csv")
@@ -244,17 +263,23 @@ for(i in 1:length(foo)){
 }
 
 names(hilevel_list) <- names(foo)
-annot.btm <- btmxls[,c(1,2)]
+annot.btm <- hilevel[,c(1,2)]
 ```
 
 # Gene expression to BTMs continued..
 
 ```{r convert to hi-level BTMs,  message=FALSE, warning=FALSE}
 COLFUN <- miscTools::colMedians
-for(i in 1:length(hilevel_list)){
-  hilevel_list[[i]] <- gsub(" ///", ",", hilevel_list[[i]])
-  hilevel_list[[i]] <- unlist(strsplit(hilevel_list[[i]], "," ))
-}
+#for(i in 1:length(hilevel_list)){
+#  hilevel_list[[i]] <- gsub(" ///", ",", hilevel_list[[i]])
+#  hilevel_list[[i]] <- unlist(strsplit(hilevel_list[[i]], "," ))
+#}
+
+# read in the modified hilevel_list after running the loop, above
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("1Bczkl0ZB71HICJ-wYhBeFGPAeVz-drc4"), path = temp, overwrite = TRUE)
+hilevel_list <- readRDS(dl$local_path)
 
 pas <- c()
 for( i in 1:length(hilevel_list)){
@@ -268,11 +293,18 @@ pas.df<-t(pas.df)
 colnames(pas.df) <- pas.df[1,]
 pas.df<-pas.df[-1,]
 pas.df<-data.frame(pas.df)%>%rownames_to_column(., var="PATID.OG")
-# Change all the scores in the matrix from 'factor' to 'numeric'
-indx <- sapply(pas.df, is.factor)
-pas.df[indx] <- lapply(pas.df[indx], function(x) as.numeric(as.character(x)))
-```
 
+# Change all the scores in the matrix from 'factor' to 'numeric'
+# Note: This changes the PATID.OG column to numeric as well and fills it in with NAs. Merge the PATID.OGs from expr_data (above) to the pas.df data frame
+indx <- sapply(pas.df, is.character)
+pas.df[indx] <- lapply(pas.df[indx], function(x) as.numeric(as.character(x)))
+pas.df<-pas.df[, -1]
+e<-t(expr_data)
+e<-as.data.frame(e)%>%rownames_to_column(., var="PATID.OG")
+pas.df$`PATID.OG`<-e[,1]
+pas.df <- pas.df %>%
+dplyr::select("PATID.OG", everything())
+```
 
 #Convert Gene expression data to Monaco modules for downstream analyses
 
@@ -310,7 +342,7 @@ for( i in 1:length(MonacoModules)){
 names(pas_m) <- names(MonacoModules)
 pas_m.df <- do.call("rbind", pas_m)
 
-pas_m.df<-t(pas_m.df)  
+pas_m.df<-t(pas_m.df)  ## see next chunk for delta
 pas_m.df<-data.frame(pas_m.df)%>%rownames_to_column(., var="PATID.OG")
 ```
 
@@ -406,8 +438,8 @@ dplyr::rename("Memory B cells"  = "B.Memory")%>%
     dplyr::rename("Vδ2 γδ T cells"  = "T.gd.Vd2")
 
 #Clean up the merged table, removing columns that are not needed
-all_data_btm<-all_data_btm[,-c(1:3)]
-all_data_monaco<-all_data_monaco[,-c(1:3)]
+all_data_btm<-all_data_btm[,-c(1:4)]
+all_data_monaco<-all_data_monaco[,-c(1:4)]
 ```
 
 #Run correlations
@@ -424,7 +456,7 @@ p.mat_btm[lower.tri(p.mat_btm, diag=TRUE)] <- NA   #use adjusted P values
 p.mat_btm <- pmax(p.mat_btm, t(p.mat_btm), na.rm=TRUE)
 
 # use an FDR cutoff to include only significant correlations (cutoffs indicated in figure legends)
-fdr <- 0.05
+fdr <- 0.1
 d_sig_btm  <- which(p.mat_btm <fdr, arr.ind = T)
 foo_cor_btm <- cor_btm[unique(d_sig_btm[,1]),unique(d_sig_btm[,2])]  #get row and columns that include significant values
 foo_pval_btm <- p.mat_btm[unique(d_sig_btm[,1]),unique(d_sig_btm[,2])]  #get row and columns that include significant values
@@ -442,7 +474,7 @@ p.mat_m[lower.tri(p.mat_m, diag=TRUE)] <- NA   #use adjusted P values
 p.mat_m <- pmax(p.mat_m, t(p.mat_m), na.rm=TRUE)
 
 # use an FDR cutoff to include only significant correlations (cutoffs indicated in figure legends)
-fdr <- 0.05
+fdr <- 0.2
 d_sig_m  <- which(p.mat_m <fdr, arr.ind = T)
 foo_cor_m <- cor_m[unique(d_sig_m[,1]),unique(d_sig_m[,2])] #get row and columns that include significant values
 foo_pval_m <- p.mat_m[unique(d_sig_m[,1]),unique(d_sig_m[,2])]  #get row and columns that include significant values
@@ -549,7 +581,7 @@ group_color1_btm <- structure(circlize::rand_color(length(gl1_btm),hue = "monoch
 n_group1_btm <-  length(gl1_btm)
 
 ## to get CSP-specific IgG, outcome and dose together
-combo3_btm<-combo3_btm %>% arrange(factor(Data.Type, levels = c("Outcome", "Antibody","Cellular expression",   "Gene Expression"))) 
+combo3_btm<-combo3_btm %>% arrange(factor(Data.Type, levels = c("Outcome", "Antibody","Cellular expression", "Gene Expression"))) 
 
 combo4_btm <- combo3_btm[,intersect(rownames(combo3_btm), colnames(combo3_btm))]
 
@@ -563,7 +595,7 @@ order_btm<-colnames(mat_btm)
 col_fun_btm <- colorRamp2(c( 0, 1), c( "white", "darkblue"), transparency = 0.5)
 
 
-cairo_pdf("Timpoint_post-vaccination_FDR_0.05_Hilevel_BTMS.pdf", height = 10, width = 10)
+cairo_pdf("Timpoint_delta_FDR_0.1_Hilevel_BTMS.pdf", height = 10, width = 10)
 circos.par(canvas.xlim = c(-1.8,1.8), canvas.ylim = c(-1.8,1.8), points.overflow.warning=FALSE, 
            track.margin = c(0.01, 0.05), # adjust bottom and top margin
            track.height = 0.05, start.degree = 180)
@@ -589,7 +621,7 @@ highlight.sector(rownames(combo3_btm)[which(combo3_btm$Data.Type == "Gene Expres
 dev.off()
 circos.clear()
 # Upload the plot
-drive_upload("Timpoint_post-vaccination_FDR_0.05_Hilevel_BTMS.pdf")
+drive_upload("Timpoint_delta_FDR_0.1_Hilevel_BTMS.pdf")
 ```
 
 #Plot the chord diagram for Monaco modules
@@ -618,7 +650,7 @@ order_monaco<-colnames(mat_monaco)
 col_fun_monaco <- colorRamp2(c( 0, 1), c( "white", "darkblue"), transparency = 0.5)
 
 
-cairo_pdf("Timpoint_post-vaccination_FDR_0.05_Monaco.pdf", height = 10, width = 10)
+cairo_pdf("Timpoint_delta_FDR_0.2_Monaco.pdf", height = 10, width = 10)
 circos.par(canvas.xlim = c(-1.8,1.8), canvas.ylim = c(-1.8,1.8), points.overflow.warning=FALSE, 
            track.margin = c(0.01, 0.05), # adjust bottom and top margin
            track.height = 0.05, start.degree = 180)
@@ -630,12 +662,11 @@ circos.trackPlotRegion(track.index = 1, panel.fun = function(x, y) {
   circos.text(mean(xlim), ylim[1] + 1, sector.name, facing = "clockwise", niceFacing = TRUE, adj = c(0, 0), cex = 0.7) #text for parameters
   circos.axis(h = "top", labels.cex = 0.3, major.tick = FALSE, sector.index = sector.name, track.index = 1, labels = FALSE)
 }, bg.border = NA)
-highlight.sector(rownames(combo3_monnaco)[which(combo3_monaco$Data.Type == "Outcome")],
+highlight.sector(rownames(combo3_monaco)[which(combo3_monaco$Data.Type == "Outcome")],
                  track.index = get.all.track.index(), col = "grey",
                  text = "Outcome", cex = 0.8, text.col = "black", niceFacing = TRUE)
 dev.off()
 circos.clear()
 # Upload the plot
-drive_upload("Timpoint_post-vaccination_FDR_0.05_Monaco.pdf")
+drive_upload("Timpoint_delta_FDR_0.2_Monaco.pdf")
 ```
-
