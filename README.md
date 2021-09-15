@@ -16,3 +16,16 @@ Code for systems analysis of KSPZV1 malaria vaccine trial.
 [WGCNA, pre-immunization baseline](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-WGCNA-Baseline.html)
 
 [WGCNA, delta (post-vax/baseline)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-WGCNA-Delta-Postvax.html)
+
+## Correlations and chord diagrams
+
+[Correlations, pre-immunization baseline](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Correlations-and-Chord-Diagrams-Baseline.html)
+
+[Correlations, post-vax only](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Correlations-and-Chord-Diagrams-Postvax.html)
+
+[Correlations, delta (post-vax/baseline)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Correlations-and-Chord-Diagrams-Delta.html)
+
+## Other
+
+[STS3GAL3 heatmap from other datasets](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-ST3GAL3-heatmap-from-other-datasets.html)
+
