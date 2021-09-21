@@ -56,7 +56,7 @@ for(i in names(xgroup)){
 }
 ```
 
-### Build DGEList Object and make Expression Sets
+### Build DGEList Object
 
 ```{r make DGEList object, message=FALSE, warning=FALSE}
 #Define group by dose, timepoint and outcome
@@ -78,15 +78,10 @@ for(i in names(ygroup)){
 }
 ```
 
-### Design Matrix - Compare Protected (0) vs Susceptible (1)
-
-Create design matrix according to EdgeR user guide (Ch 3.5 Comparisons Both Between and Within Subjects)  
-Note that "intergenic_adj" should only be used if you use seq data that HAS NOT been SeqMonk corrected. Choose no_adj when using SeqMonk corrected data.
-
 ### Analysis between Not Protected and Protected within a Dose Group
 
 
-```{r, build design matrix afs protected vs susceptible by group, message=FALSE, warning=FALSE}
+```{r, build design matrix protected vs not protected by group, message=FALSE, warning=FALSE}
 degtab <- setNames(as.list(c(1:4)), c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
 for(i in names(ygroup)){
   Subject <- factor(xgroup[[i]]$PATID)
@@ -98,7 +93,8 @@ for(i in names(ygroup)){
   #data.frame(Outcome, Subject, Sex, Timepoint, Batch)
   #This is the final Timepoint 0 analysis.
   design <- model.matrix(~Batch + Outcome)
-  #colnames(design)
+  print(i)
+  print(colnames(design))
   rownames(design) <- ygroup[[i]]$samples$PATID
   ygroup[[i]]     <- estimateDisp(ygroup[[i]],design, robust = TRUE)
   fit   <- glmQLFit(ygroup[[i]], design, robust = TRUE)
