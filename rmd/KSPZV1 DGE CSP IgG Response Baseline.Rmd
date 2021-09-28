@@ -1,0 +1,302 @@
+---
+title: "KSPZV1 edgeR DGE"
+author: "Tuan M. Tran"
+date: "09/26/2021"
+output: html_document
+---
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(knitr)
+library(tidyverse)
+library(edgeR)
+library(googledrive)
+library(fgsea)
+library(data.table)
+library(ggplot2)
+library(ggpubr)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Objective
+
+Perform differential gene expression using edgeR on pre-immunization baseline whole-blood samples from the KSPZV1 malaria vaccine trial with the binary outcomes for comparison being dichotomized CSP IgG levels at 2 weeks post-vax.
+
+### Load data
+
+```{r load SeqExpressionSet 2, message=FALSE, warning=FALSE}
+#from google drive
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("1Q4VXYxdl9CqtzhcvHA9pn8q06_YOZgi8"), path = temp, overwrite = TRUE)
+x <- readRDS(file = dl$local_path)
+x$treat <- factor(x$treat, levels = c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+```
+
+### CSP IgG reactivity at baseline and post-vax by treatment and outcome (Fig 3D of pre-print)
+
+```{r, simple plots of CSPAb data, echo=TRUE, warning=FALSE, message=FALSE}
+plotDat <- pData(x) %>%
+  filter(!is.na(log2FC_CSPAb)) %>% #one subject in 9.0x10^6 PfSPZ group missing CSP log2 fold change data
+  mutate(log10CSPAb = log10(CSPAb + 1)) %>%
+  mutate(Outcome = factor(Outcome, levels = c(1,0), labels = c("infected (not protected)", "uninfected (protected)"))) %>%
+  group_by(Outcome, treat, Timepoint) %>%
+  dplyr::mutate(pos = 1:n(), label = ifelse(pos==1, n(), "")) %>%
+  dplyr::select(-pos) %>%
+  ungroup() %>%
+  filter(Timepoint == 0) %>%
+  pivot_longer(., cols = c(log10CSPAb, log2FC_CSPAb), names_to = "variable", values_to = "value")
+
+
+myPlot <- plotDat %>%
+  ggplot(., aes(x = treat, y = value, fill = Outcome, color = Outcome)) +
+  geom_point(position = position_jitterdodge()) +
+  #geom_boxplot(alpha = 0.4, color = "grey30", outlier.shape = NA) +
+  geom_violin(alpha = 0.4, color = "grey30", draw_quantiles = c(0.5)) +
+  stat_compare_means(aes(label = ..p.signif.., group = Outcome), method = "wilcox.test", label.x.npc = "center", vjust = 1, show.legend = F) +
+  scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
+  scale_color_manual(values = c("#A6CEE3", "#1F78B4")) +
+  ylab("log10 CSP IgG at baseline") +
+  geom_text(position = position_dodge(width=1), aes(label=label), vjust = -0.25, color = "black") +
+  theme_bw(base_family = "Arial", base_size = 10) +
+  theme(axis.text.x=element_text(angle = 45, vjust = 1, hjust=1),
+          axis.ticks.x=element_blank(),
+          axis.title.x=element_blank(),
+          strip.text.x = element_blank(),
+          strip.background = element_blank(),
+          legend.position="top"
+          ) +
+  facet_wrap(~variable, scales = "free_y", nrow = 2,
+             strip.position = "left", 
+             labeller = as_labeller(c(log10CSPAb = "log10 CSP-specific IgG at baseline",
+                                      log2FC_CSPAb = "log2 (post-vax/baseline) CSP-specific IgG response"))) +
+     ylab(NULL) +
+     theme(strip.background = element_blank(),
+           strip.placement = "outside")
+```
+
+Violin plots showing CSP-specific IgG antibodies at baseline and as fold-change (2-weeks post-vaccination/baseline) by treatment and outcome at 3 months.
+
+```{r, print plot of CSPAb data 2, echo=FALSE, fig.align='center', fig.width=4, fig.height=7.5, message=FALSE, warning=FALSE}
+print(myPlot)
+```
+
+### Rationale for choosing cut-off for binary response
+
+Based on this data, decided on log2FC > 12.5 is good Ab response.
+
+```{r, add Ab response category to pData, message=FALSE, warning=FALSE}
+pData(x) <- pData(x) %>%
+  mutate(CSP_response_cat = factor(ifelse(log2FC_CSPAb > 12.5, "high_CSP_LFC", "low_CSP_LFC"),
+                                   levels = c("low_CSP_LFC", "high_CSP_LFC")))
+```
+
+### Set options
+
+```{r set options, message=FALSE, warning=FALSE}
+myGroups <- factor(c("4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"),
+                   levels = c("4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+myTimepoint <- 0
+```
+
+### Reduce samples
+
+```{r reduced data, message=FALSE, warning=FALSE}
+x <- x[,x$treat %in% myGroups]
+x <- x[,!is.na(x$CSP_response_cat)]
+xgroup <- setNames(as.list(c(1:3)), c("4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+for(i in names(xgroup)){
+  xgroup[[i]] <- x[, which(x$treat == i)]
+  xgroup[[i]] <- xgroup[[i]][,xgroup[[i]]$Timepoint == myTimepoint]
+  xgroup[[i]]$treat <- droplevels(xgroup[[i]]$treat)
+  print(i)
+  print(table(Outcome = xgroup[[i]]$Outcome, Timepoint = xgroup[[i]]$Timepoint))
+  print(table(Outcome = xgroup[[i]]$Outcome, Dosegroup = xgroup[[i]]$treat))
+  print(dim(xgroup[[i]]))
+}
+```
+
+### Build DGEList Object
+
+```{r make DGEList object, message=FALSE, warning=FALSE}
+#Define group by dose, timepoint and CSP response
+ygroup <- setNames(as.list(c(1:3)), c("4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+for(i in names(ygroup)){
+  ygroup[[i]]  <- DGEList(counts=counts(xgroup[[i]]), genes=fData(xgroup[[i]]), group= factor(paste(xgroup[[i]]$treat, xgroup[[i]]$Timepoint, xgroup[[i]]$CSP_response_cat, sep = "_")), remove.zeros=T)
+  ygroup[[i]]$samples$PATID <- gsub("_.*", "", rownames(ygroup[[i]]$samples))
+}
+```
+
+### Filter out low expression features
+
+```{r low expression filters, message=FALSE, warning=FALSE}
+for(i in names(ygroup)){
+  keep <- filterByExpr(ygroup[[i]])
+  ygroup[[i]] <- ygroup[[i]][keep, , keep.lib.sizes=FALSE]
+  ygroup[[i]]$samples$lib.size <- colSums(ygroup[[i]]$counts)
+  ygroup[[i]] <- calcNormFactors(ygroup[[i]])	#Normalization
+}
+```
+
+### Analysis between high CSP LFC and low CSP LFC within a Dose Group
+
+```{r, build design matrix protected vs not protected by group, message=FALSE, warning=FALSE}
+degtab <- design <- setNames(as.list(c(1:3)), c("4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+for(i in names(ygroup)){
+  Subject <- factor(xgroup[[i]]$PATID)
+  CSPResponse <- factor(xgroup[[i]]$CSP_response_cat)
+  Protection <- factor(xgroup[[i]]$Outcome, levels = c(0,1), labels = c("protected", "notprotected"))
+  Batch <- factor(xgroup[[i]]$SEQBATCH, levels = c("Aug2019","Nov2019"))
+  design[[i]] <- model.matrix(~Batch + Protection + CSPResponse)
+  print(i)
+  print(colnames(design[[i]]))
+  rownames(design[[i]]) <- ygroup[[i]]$samples$PATID
+  ygroup[[i]]     <- estimateDisp(ygroup[[i]],design[[i]], robust = TRUE)
+  fit   <- glmQLFit(ygroup[[i]], design[[i]], robust = TRUE)
+  print("glmQLFit done.")
+  qlf <- glmQLFTest(fit, coef = "CSPResponsehigh_CSP_LFC")
+  print("glmQLFTest done.")
+  degtab[[i]] <- topTags(qlf, n = Inf)
+}
+
+temp <- degtab
+for(i in names(degtab)){
+  temp[[i]] <- degtab[[i]]$table %>%
+    dplyr::select(7,8,10:14) %>%
+    head(.,15)
+  }
+```
+
+### Examine top 15 DEGs (high CSP response vs low CSP response)
+
+4.5 x 10^5 PfSPZ 
+
+```{r DEG table low dose, echo = FALSE}
+knitr::kable(temp$`4.5 x 10^5 PfSPZ`)
+```
+
+9.0 x 10^5 PfSPZ 
+
+```{r DEG table med dose, echo = FALSE}
+knitr::kable(temp$`9.0 x 10^5 PfSPZ`)
+```
+
+1.8 x 10^6 PfSPZ 
+
+```{r DEG table high dose, echo = FALSE}
+knitr::kable(temp$`1.8 x 10^6 PfSPZ`)
+```
+
+### Apply GSEA
+
+Rank genes by -log10(PValue)*sign(logFC). Run fgsea from fgsea package using NamedGeneRankList2GseaTable helper function.
+
+```{r apply fgsea, warning=FALSE, message=FALSE}
+set.seed(23)
+ranks <- degtab
+for(i in names(degtab)){
+  ranks[[i]] <- degtab[[i]]$table %>% 
+  mutate(rankmetric = -log10(.$PValue)*sign(.$logFC)) %>%
+  dplyr::select(GeneSymbol,rankmetric) %>% 
+  na.omit() %>% 
+  distinct() %>% 
+  group_by(GeneSymbol) %>%  
+  summarize(rankmetric = mean(rankmetric)) %>%
+  arrange(desc(rankmetric)) %>%
+  deframe()
+}
+#Run fgsea from fgsea package using NamedGeneRankList2GseaTable helper function
+devtools::source_url("https://github.com/TranLab/ModuleLists/blob/main/NamedGeneRankList2GseaTable.R?raw=TRUE")
+GSEAtab <- ranks
+for(i in names(ranks)){
+  GSEAtab[[i]] <- NamedGeneRankList2GseaTable(rankedgenes = ranks[[i]],
+                                         geneset = "all",
+                                         output_directory = tempdir(),
+                                         filename_prefix = "GSEA",
+                                         sampleSize = 101,
+                                         minSize = 20,
+                                         maxSize = Inf,
+                                         scoreType = "std") %>%
+    as_tibble() %>%
+    arrange(desc(NES)) %>% 
+    dplyr::select(module_type, pathway, ES, NES, size, leadingEdge, pval, padj) %>% 
+    mutate(leadingEdge = gsub("^c\\(|\\)$", "", leadingEdge)) %>%
+    mutate(leadingEdge = gsub('"', "", leadingEdge)) %>%
+    arrange(padj)
+}
+```
+
+### Visualize GSEA data as bubble plot for 1.8x10^6 PfSPZ dose group.
+
+Filter based on padj < 0.05.
+
+```{r visualize GSEA data, message=FALSE, warning=FALSE}
+plotDat <- GSEAtab %>%
+  bind_rows(., .id = "dosegroup") %>%
+  mutate(dosegroup = factor(dosegroup, levels = c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))) %>%
+  filter(padj < 0.05) %>%
+  filter(module_type %in% c("highBTMs", "lowBTMs", "MonacoModules", "BloodGen3Module", "MSigDB_Hallmark_v7.4"))  %>%
+  filter(!grepl("TBA", pathway)) %>%
+  dplyr::select(dosegroup, module_type, pathway, leadingEdge, size, NES, padj) %>%
+  mutate(neglogpadj = -log10(padj)) %>%
+  mutate(pathway = gsub("gd", "γδ", pathway)) %>%
+  mutate(pathway = gsub("Vd2", "Vδ2", pathway)) %>%
+  mutate(pathway = gsub("Vg", "Vγ", pathway)) %>%
+  mutate(pathway = gsub("HALLMARK_", "", pathway)) %>%
+  mutate(pathway = gsub("_", " ", pathway)) %>%
+  mutate(pathway = sub(".*?\\_", "", pathway)) %>%
+  group_by(module_type, dosegroup) %>%
+  #mutate(pathway = fct_reorder(pathway, NES, .desc = TRUE)) %>%
+  ungroup() %>%
+  mutate(dosegroup = fct_rev(dosegroup)) %>%
+  filter(!grepl("TBD", pathway)) %>%
+  mutate(module_type = factor(module_type, levels = c("highBTMs", "MonacoModules", "lowBTMs", "MSigDB_Hallmark_v7.4", "BloodGen3Module"))) %>%
+  arrange(desc(neglogpadj)) %>% 
+  droplevels()
+
+#plotting options
+basetextsize <- 8  
+myfont <- "sans"
+bubble_max_size <- 8
+
+myPlot <- plotDat %>%
+  filter(dosegroup == "1.8 x 10^6 PfSPZ") %>%
+  filter(module_type %in% c("highBTMs", "MonacoModules"))  %>%
+  ggplot(., aes(x = dosegroup, y = factor(pathway, 
+       levels = rev(levels(factor(pathway)))))) +
+  geom_point(aes(size=neglogpadj, fill = NES), alpha = 0.65, shape=21, stroke = 0.25) +
+  scale_size_area(name = expression(-log[10]~adj.~p~value), max_size = bubble_max_size) +
+      scale_fill_gradient2(low = "blue",
+                           mid = "white",
+                           high = "red") +
+  hrbrthemes::theme_ipsum_es(base_family = myfont, base_size = basetextsize) +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x.bottom = element_blank(),
+        strip.background = element_blank(),
+        legend.position = "left",
+        legend.direction = "vertical",
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+facet_wrap(~module_type, scales = "free_y", nrow = 2, strip.position = "right")
+```
+
+### Plot GSEA bubbleplots (Figure 3E of pre-print)
+
+GSEA using genes ranked by direction and significance of differential gene expression (DGE) at baseline between infants immunized with 1.8x106 PfSPZ who subsequently developed either a high or low CSP IgG response post-vaccination. Only modules with a Benjamini-Hochberg-adjusted p<0.05 are shown. NES = normalized enrichment score.
+
+Red: enriched in protected/uninfected through 3 months post-vax surveillance
+Blue: enriched in not protected/infected through 3 months post-vax surveillance
+
+```{r plot gsea bubbleplot, fig.align='center', fig.width=5, fig.height=6, echo=FALSE, message=FALSE, warning=FALSE}
+addSmallLegend <- function(myPlot, pointSize = 4, textSize = 6, spaceLegend = 0.6) {
+    myPlot +
+        guides(shape = guide_legend(override.aes = list(size = pointSize)),
+               color = guide_legend(override.aes = list(size = pointSize))) +
+        theme(legend.title = element_text(size = textSize), 
+              legend.text  = element_text(size = textSize),
+              legend.key.size = unit(spaceLegend, "lines"))
+}
+print(addSmallLegend(myPlot))
+```

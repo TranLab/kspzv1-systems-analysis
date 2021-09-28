@@ -1,0 +1,211 @@
+---
+title: "KSPZV1 Correlate Cellular and CSP IgG Features to Time to Parasitemia through 6 months"
+author: "Tuan M. Tran"
+date: "09/27/2021"
+output: html_document
+---
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(knitr)
+library(tidyverse)
+library(googledrive)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(fgsea)
+library(data.table)
+library(Biobase)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Objective
+
+Plot correlations between adaptive features (both baseline and post-vax) and time to first Pf infection through 6 months of surveillance post-vaccination.
+
+### Load data
+
+```{r load data, message=FALSE, warning=FALSE}
+#from google drive
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("1pSt3bzf_F8KO4mQRQojLuYHexGewLwPI"), path = temp, overwrite = TRUE)
+summarized_correlations <- readRDS(file = dl$local_path)
+```
+
+### CSP IgG reactivity at baseline and post-vax by treatment and outcome (Fig 3D of pre-print)
+
+```{r, volcano plot, echo=TRUE, warning=FALSE, message=FALSE}
+cols <- c("baseline" = "blue", "2 weeks post-vax" = "red", "log2 fold-change" = "orange")
+cols2 <- c("baseline" = "blue", "2 weeks post-vax" = "red", "log2 fold-change" = "orange", "not significant" = "gray")
+myPlot <- ggplot(summarized_correlations, aes(x = pearson_r, y = neglogpval, fill = timepoint2, color = timepoint, label = label)) +
+  geom_point(shape = 21, alpha = 0.75, size = 2) +
+  ggrepel::geom_text_repel(aes(label=label),hjust=0, vjust=0, color = "black", force_pull = 1, size = 3.25, segment.size = 0.2) +
+  scale_color_manual(values = cols, aesthetics = "colour") +
+  scale_fill_manual(values = cols2, aesthetics = "fill") +
+  theme_bw(base_family = "Arial", base_size = 14) +
+  geom_hline(yintercept = 1.3, linetype = "dotted", color = "red")+
+  ylab("-log10(p value)") +
+  xlab("Pearson's r") +
+  xlim(c(-0.4,0.4)) +
+  theme(legend.position = "top", legend.box="vertical", legend.margin=margin())
+```
+
+Volcano plot of CSP-specific IgG and flow cytometry features at each timepoint or calculated as fold-change
+post-vaccination over baseline. Red dashed line indicates P = 0.05.
+
+```{r, print volcano plot, echo=FALSE, fig.align='center', fig.width=6.5, fig.height=6, message=FALSE, warning=FALSE}
+print(myPlot)
+```
+
+### Show correlation between CSP-specific memory B cells and time-to-first parasitemia up to 6 months as scatter plot (Fig 3B of pre-print)
+
+Correlation between CSP-specific memory B cells and time-to-first parasitemia up to 6 months (n=183) by presence (not protected, NP) or absence (protected, P) of parasitemia through 3 months of follow up
+
+```{r plot CSP-specific of memory B cells vs TTE 6 months, message=FALSE, warning=TRUE}
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("1v2l7G7AzXhgcqObzAabYy6_QJsdB5hFn"), path = temp, overwrite = TRUE)
+longdat.tte <- readRDS(file = dl$local_path)
+
+longdat.tte.CSPmemB <- longdat.tte %>%
+  dplyr::filter(feature == "CSP-specific of memory B cells") %>%
+  dplyr::filter(!is.na(Post_Vaccination)) %>%
+  dplyr::filter(!is.na(tte.mal.atp.6)) 
+CSPmemB_TTE_plot <- ggplot(longdat.tte.CSPmemB, aes(x = tte.mal.atp.6, y = Post_Vaccination)) +
+  geom_point() +
+  theme_bw()
+
+myCorMeth <- "pearson"
+CSPmemB_TTE_plot <- ggscatter(longdat.tte.CSPmemB, x = "tte.mal.atp.6", y = "Post_Vaccination",
+            conf.int = TRUE , add = "reg.line", size = 2,
+            cor.coef.size = 1,
+            add.params = list(color = "black", fill = "lightgray", alpha = 0.4, size = 1),
+            fill = "Outcome", color = "Outcome") +
+  stat_cor(method = myCorMeth) +
+  scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
+  scale_color_manual(values = c("#A6CEE3", "#1F78B4")) +
+  xlab("days to first parasitemia (6 month follow-up)") +
+  ylab("% CSP-specific of memory B cells") +
+  theme_bw(base_family = "Arial", base_size = 14) +
+  theme(legend.position="top") 
+```
+
+```{r,  print scatter plot, echo=FALSE, fig.align='center', fig.width=5, fig.height=4.25, message=FALSE, warning=FALSE}
+print(CSPmemB_TTE_plot)
+```
+
+### Correlate Baselinelines with CSP-specific memory B cells
+
+```{r prepare cpm data, warning=FALSE, message=FALSE}
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("1togaBlNIxiDj16FyXTC-r7Qw0A9cG2az"), path = temp, overwrite = TRUE)
+x  <- readRDS(file = dl$local_path)
+```
+
+```{r correlate baseline genes with CSP-specific, message=FALSE, warning=FALSE}
+csp.memoryB.dat <- longdat.tte %>%
+  dplyr::select(PATID, Dosegroup, Outcome, feature, Post_Vaccination) %>%
+  dplyr::filter(feature == "CSP-specific of memory B cells") %>%
+  pivot_wider(names_from = "feature", values_from = "Post_Vaccination")
+  
+cpm.dat <- exprs(x) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "SAMPLEID") %>%
+  dplyr::filter(grepl("_0", SAMPLEID)) %>%
+  mutate(PATID = gsub("_0", "", SAMPLEID)) %>%
+  dplyr::select(PATID, everything()) %>%
+  dplyr::select(-c(SAMPLEID)) %>%
+  pivot_longer(cols = 2:ncol(.), names_to = "EnsemblID", values_to = "CPM") %>%
+  left_join(., csp.memoryB.dat,
+            by = "PATID") %>%
+  left_join(., fData(x) %>%
+               dplyr::select(EnsemblID, GeneSymbol),
+             by = "EnsemblID")
+
+summarized_cpm_CSPmemB <- cpm.dat %>%
+  dplyr::filter(!is.na(`CSP-specific of memory B cells`)) %>%
+  group_by(GeneSymbol, EnsemblID) %>%
+  summarise(baselineCPM_pearson_r_CSPMemB = stats::cor.test(CPM, `CSP-specific of memory B cells`, method = myCorMeth)$estimate,
+            baselineCPM_pearson_pval_CSPMemB = stats::cor.test(CPM, `CSP-specific of memory B cells`, method = myCorMeth)$p.val) %>%
+  mutate(RankMetric = sign(baselineCPM_pearson_r_CSPMemB)*-(log10(baselineCPM_pearson_pval_CSPMemB))) %>%
+  arrange(desc(RankMetric))
+```
+
+### Apply GSEA
+
+```{r apply fgsea, warning=FALSE, message=FALSE}
+res <- summarized_cpm_CSPmemB %>%
+  dplyr::select(GeneSymbol, RankMetric) %>%
+  na.omit() %>% 
+  distinct() %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(RankMetric = mean(RankMetric)) %>%
+  arrange(desc(RankMetric)) 
+ranks <- deframe(res)
+head(ranks, 20)
+#ignore warning about ties since there is only one duplicated RankMetric ranks[DescTools::AllDuplicated(ranks)]
+#AC069547.1 RP11-521C22.3 
+#0.0001374268  0.0001374268 
+ranks <- deframe(res)
+
+devtools::source_url("https://github.com/TranLab/ModuleLists/blob/main/NamedGeneRankList2GseaTable.R?raw=TRUE")
+bound_df_GSEA <- NamedGeneRankList2GseaTable(rankedgenes = ranks, geneset = "bloodmodules", output_directory = tempdir(), filename_prefix = "GSEA_baseline_CPM_postvax_CSPmemB_AllGroups", minSize = 20, fixed_seed = TRUE)
+```
+
+### Plot GSEA results as bar plot (Fig 3C of pre-print)
+
+Gene set enrichment analysis (GSEA) using genes ranked by magnitude and significance of correlation between baseline expression and % CSP-specific of memory B cells at 2-weeks post-vaccination.
+
+```{r arrange data for plots, echo = FALSE}
+myfunction <- function(leadingEdge) { length(unlist(strsplit(leadingEdge, ", "))) }
+myFDRcutoff <- 0.05
+
+myModules <- c("lowBTMs", "highBTMs", "MonacoModules", "BloodGen3Module", "MSigDB_Hallmark_v7.4")
+myGSEAClusterPlotDat <- bound_df_GSEA %>%
+  filter(padj < myFDRcutoff) %>%
+  filter(module_type %in% myModules) %>%
+  dplyr::mutate(edges = purrr::pmap_dbl(list(leadingEdge), myfunction)) %>%
+  dplyr::mutate(bubblelabel = paste(edges,size, sep = "/")) %>%
+  group_by(module_type) %>%
+    arrange(module_type, desc(NES), padj) %>%
+    dplyr::select(module_type, pathway, edges, size, bubblelabel, NES, padj) %>%
+  ungroup() %>%
+  filter(!grepl("TBA", pathway)) %>%
+  mutate(pathway = gsub("gd", "γδ", pathway)) %>%
+  mutate(pathway = gsub("Vd2", "Vδ2", pathway)) %>%
+  mutate(pathway = gsub("Vg", "Vγ", pathway)) %>%
+  mutate(pathway = gsub("HALLMARK_", "", pathway)) %>%
+  mutate(pathway = gsub("_", " ", pathway)) %>%
+  mutate(neglogpadj = -log10(padj)) %>%
+  arrange(neglogpadj) %>%
+  mutate(pathway = fct_reorder(pathway, NES, .desc=TRUE)) %>%
+  mutate(pathway = fct_reorder(pathway, neglogpadj)) %>%
+  mutate(TextLabelColor = ifelse(module_type == "lowBTMs", scales::muted("red"),
+                                 ifelse(module_type == "highBTMs", scales::muted("blue"),
+                                        ifelse(module_type == "MonacoModules", "black","orange")))) %>%
+  arrange(desc(neglogpadj))
+myColors <- rev(myGSEAClusterPlotDat$TextLabelColor)
+myGSEAClusterPlot <- myGSEAClusterPlotDat %>%
+  ggplot(., aes(x = NES, y = pathway, fill = neglogpadj)) +
+  geom_bar(stat = 'identity') + 
+  viridis::scale_fill_viridis(option= "A", begin = 0.25, end = 0.75, alpha = 0.8, direction = -1, name = "neglogpadj") +
+  theme_classic(base_family = "Arial", base_size = 14) +
+  theme(legend.position = "bottom", axis.text.y = element_text(colour = myColors))
+```
+
+```{r print GSEA plot, fig.align='center', fig.height=6, fig.width=6, echo=FALSE}
+addSmallLegend <- function(myPlot, pointSize = 6, textSize = 6, spaceLegend = 1) {
+    myPlot +
+        guides(shape = guide_legend(override.aes = list(size = pointSize)),
+               color = guide_legend(override.aes = list(size = pointSize))) +
+        theme(legend.title = element_text(size = textSize), 
+              legend.text  = element_text(size = textSize),
+              legend.key.size = unit(spaceLegend, "lines"))
+}
+print(addSmallLegend(myGSEAClusterPlot))
+```
