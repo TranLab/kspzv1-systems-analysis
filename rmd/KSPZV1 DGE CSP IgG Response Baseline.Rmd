@@ -1,5 +1,5 @@
 ---
-title: "KSPZV1 edgeR DGE"
+title: "KSPZV1 edgeR DGE CSP-specific IgG Response, pre-immunization baseline transcriptomes"
 author: "Tuan M. Tran"
 date: "09/26/2021"
 output: html_document
@@ -38,6 +38,7 @@ x$treat <- factor(x$treat, levels = c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5
 ### CSP IgG reactivity at baseline and post-vax by treatment and outcome (Fig 3D of pre-print)
 
 ```{r, simple plots of CSPAb data, echo=TRUE, warning=FALSE, message=FALSE}
+set.seed(23)
 plotDat <- pData(x) %>%
   filter(!is.na(log2FC_CSPAb)) %>% #one subject in 9.0x10^6 PfSPZ group missing CSP log2 fold change data
   mutate(log10CSPAb = log10(CSPAb + 1)) %>%
@@ -53,7 +54,6 @@ plotDat <- pData(x) %>%
 myPlot <- plotDat %>%
   ggplot(., aes(x = treat, y = value, fill = Outcome, color = Outcome)) +
   geom_point(position = position_jitterdodge()) +
-  #geom_boxplot(alpha = 0.4, color = "grey30", outlier.shape = NA) +
   geom_violin(alpha = 0.4, color = "grey30", draw_quantiles = c(0.5)) +
   stat_compare_means(aes(label = ..p.signif.., group = Outcome), method = "wilcox.test", label.x.npc = "center", vjust = 1, show.legend = F) +
   scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
@@ -79,8 +79,15 @@ myPlot <- plotDat %>%
 
 Violin plots showing CSP-specific IgG antibodies at baseline and as fold-change (2-weeks post-vaccination/baseline) by treatment and outcome at 3 months.
 
-```{r, print plot of CSPAb data 2, echo=FALSE, fig.align='center', fig.width=4, fig.height=7.5, message=FALSE, warning=FALSE}
+```{r, print plot of CSPAb data 2, echo=FALSE, fig.align='center', fig.width=3.75, fig.height=8.25, message=FALSE, warning=FALSE}
 print(myPlot)
+```
+
+```{r, print plot of CSPAb data tp PDF, echo=FALSE, include=FALSE, fig.align='center', fig.width=4, fig.height=9, message=FALSE, warning=FALSE}
+cairo_pdf(filename = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Figures/Working Figures for Submission/Fig 3D revised only samples with transcriptomes_v2.pdf",
+          width = 4.5, height = 6.5)
+print(myPlot)
+dev.off()
 ```
 
 ### Rationale for choosing cut-off for binary response
