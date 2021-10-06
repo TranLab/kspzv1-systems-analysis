@@ -1,5 +1,5 @@
 ---
-title: "KSPZV1 DGE Δ (postvax/baseline) edgeR"
+title: "KSPZV1 DGE Δ (postvax/baseline) edgeR for 1.8 x 10^6 PfSPZ group"
 author: "Tuan M. Tran"
 date: "09/28/2021"
 output: html_document
@@ -7,7 +7,7 @@ output: html_document
 
 ### Objective
 
-Perform differential gene expression using edgeR to assess differences betwee protected and not protected infants in the KSPZV1 malaria vaccine trial.
+Perform differential gene expression using edgeR to assess differences betwee protected (P) and not protected (NP) infants in the KSPZV1 malaria vaccine trial.
 This analysis specifically evaluates differences in post-vax with adjustment for baseline.
 
 
@@ -56,14 +56,23 @@ for(i in names(xgroup)){
   print(dim(xgroup[[i]]))
 }
 ```
+### Reduce to high dose only
 
-## Build DGEList Object and make Expression Sets
+This reduces the time and enables the code to be knitted without throwing errors related to url connections.
+Can leave out if all treatment groups are analyzed when script is ran locally.
+
+```{r reduce to high dose only, message=FALSE, warning=FALSE}
+myList <- c("1.8 x 10^6 PfSPZ")
+for (name in myList) {
+  xgroup <- xgroup[name] 
+}
+```
 
 ### Build DGEList Object
 
 ```{r make DGEList object, message=FALSE, warning=FALSE}
 #Define group by dose, timepoint and outcome
-ygroup <- setNames(as.list(c(1:4)), c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+ygroup <- xgroup
 for(i in names(ygroup)){
   ygroup[[i]]  <- DGEList(counts=counts(xgroup[[i]]), genes=fData(xgroup[[i]]), group= factor(paste(xgroup[[i]]$treat, xgroup[[i]]$Timepoint, xgroup[[i]]$Outcome, sep = "_")), remove.zeros=T)
   ygroup[[i]]$samples$PATID <- gsub("_.*", "", rownames(ygroup[[i]]$samples))
@@ -81,9 +90,9 @@ for(i in names(ygroup)){
 }
 ```
 
-##Remove unpaired samples and then arrange by patient and timepoint
+### Remove unpaired samples and then arrange by patient and timepoint
 
-This is necessary for paired analyses
+This is necessary for paired analyses.
 
 ```{r remove unpaired samples then arrange, message=FALSE, warning=FALSE}
 for(i in names(ygroup)){
@@ -98,7 +107,7 @@ for(i in names(ygroup)){
 }
 ```
 
-## Remake ExpressionSet after sample and feature (gene) filtering steps.
+### Remake ExpressionSet after sample and feature (gene) filtering steps.
 
 ```{r remake SeqExpressionSet after gene filtering and sample reduction, message=FALSE, warning=FALSE}
 for(i in names(ygroup)){
@@ -109,10 +118,9 @@ for(i in names(ygroup)){
 }
 ```
 
-## Design Matrix - Compare Protected (0) vs Not Protected (1)
+### Design Matrix - Compare Protected (0) vs Not Protected (1)
 
 Create design matrix according to EdgeR user guide (Ch 3.5 Comparisons Both Between and Within Subjects)  
-Note that "intergenic_adj" should only be used if you use seq data that HAS NOT been SeqMonk corrected. Choose no_adj when using SeqMonk corrected data.
 
 ### Analysis between Protected and Susceptible within a Dose Group
 
@@ -130,7 +138,7 @@ for(i in names(xgroup)){
   MALdVax <- factor(xgroup[[i]]$mal.dvax, levels = c(0,1), labels = c("noMALdVAX","yesMALdVAX"))
   CSPAb_baseline <- as.numeric(xgroup[[i]]$pfcsp_pre)
   CSPAb_baseline[is.na(CSPAb_baseline)] <- median(CSPAb_baseline, na.rm = TRUE) #Impute 2 missing values with median of all samples
-  #Dfine protective outcome-specific PfSPZ Vaccination effects and append them to the design matrix
+  #Define protective outcome-specific PfSPZ Vaccination effects and append them to the design matrix
   Protected.Postvax <- Outcome == "Protected" & Timepoint=="postvax"
   NotProtected.Postvax <- Outcome =="NotProtected" & Timepoint=="postvax"
   design[[i]] <- model.matrix(~Subject)
@@ -213,7 +221,7 @@ Rank genes by -log10(PValue)*sign(logFC). Run fgsea from fgsea package using Nam
 ```{r apply fgsea, warning=FALSE, message=FALSE}
 set.seed(23)
 #restructure dataframes
-degtabs <- setNames(as.list(c(1:4)), c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+degtabs <- ygroup
 for(i in names(ygroup)){
     degtabs[[i]] <- setNames(as.list(c(1:3)), c("DeltaDelta", "DeltaP", "DeltaNP"))
     degtabs[[i]]$DeltaDelta <- DeltaDelta[[i]]
@@ -253,10 +261,23 @@ for(i in names(ranks)){
       mutate(leadingEdge = gsub("^c\\(|\\)$", "", leadingEdge)) %>%
       mutate(leadingEdge = gsub('"', "", leadingEdge)) %>%
       arrange(padj)
-    closeAllConnections() #this line prevents using up all url connections
+    #close(url) #this line prevents using up all url connections
   }
 }
 ```
+```{r make table for manuscript, eval=FALSE, echo=FALSE}
+delta_high_dose_df <- bind_rows(degtabs$`1.8 x 10^6 PfSPZ`, .id = "comparison") %>%
+  as_tibble() %>%
+  dplyr::rename(description = descripton_new, hgnc_symbol = GeneSymbol, ensembl_id = EnsemblID) %>%
+  mutate(study = "KSPZV1",
+         treatment = "1.8x10^6 PFSPZ",
+         timepoint = "delta (post-immunization/pre-immunization baseline",
+         comparison = gsub("DeltaDelta", "ΔP vs ΔNP", comparison)) %>%
+  mutate(comparison = gsub("Delta", "Δ", comparison)) %>%
+  dplyr::select(study, treatment, timepoint, comparison, hgnc_symbol, ensembl_id, description, logFC, logCPM, F, PValue, FDR)
+# writexl::write_xlsx(delta_high_dose_df, "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Figures/Working Figures for Submission/Supplementary Tables/Table S3 Delta DEG Tables for high-dose PfSPZ KSPZV1.xlsx")
+```
+
 
 ### Visualize GSEA data as bubble plot
 
@@ -327,7 +348,7 @@ addSmallLegend <- function(myPlot, pointSize = 4, textSize = 6, spaceLegend = 0.
 print(addSmallLegend(MyPlot))
 ```
 
-```{r plot gsea bubbleplot to pdf, echo=FALSE, include=FALSE}
+```{r plot gsea bubbleplot to pdf, echo=FALSE, eval=FALSE}
 # cairo_pdf(filename = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Figures/Working Figures for Submission/Fig 4G Delta DGE EdgeR Bubble Plot 09282021.pdf",
 #           height = 3.7,
 #           width = 6)
