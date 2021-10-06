@@ -7,7 +7,7 @@ output: html_document
 
 ### Objective
 
-Perform differential gene expression using edgeR to assess differences betwee protected and not protected infants in the KSPZV1 malaria vaccine trial.
+Perform differential gene expression using edgeR to assess differences betwee protected (P) and not protected (NP) infants in the KSPZV1 malaria vaccine trial.
 This analysis specifically evaluates differences in post-vax with adjustment for baseline.
 
 
@@ -253,10 +253,23 @@ for(i in names(ranks)){
       mutate(leadingEdge = gsub("^c\\(|\\)$", "", leadingEdge)) %>%
       mutate(leadingEdge = gsub('"', "", leadingEdge)) %>%
       arrange(padj)
-    closeAllConnections() #this line prevents using up all url connections
+    #close(url) #this line prevents using up all url connections
   }
 }
 ```
+```{r make table for manuscript, eval=FALSE, echo=FALSE}
+delta_high_dose_df <- bind_rows(degtabs$`1.8 x 10^6 PfSPZ`, .id = "comparison") %>%
+  as_tibble() %>%
+  dplyr::rename(description = descripton_new, hgnc_symbol = GeneSymbol, ensembl_id = EnsemblID) %>%
+  mutate(study = "KSPZV1",
+         treatment = "1.8x10^6 PFSPZ",
+         timepoint = "delta (post-immunization/pre-immunization baseline",
+         comparison = gsub("DeltaDelta", "ΔP vs ΔNP", comparison)) %>%
+  mutate(comparison = gsub("Delta", "Δ", comparison)) %>%
+  dplyr::select(study, treatment, timepoint, comparison, hgnc_symbol, ensembl_id, description, logFC, logCPM, F, PValue, FDR)
+# writexl::write_xlsx(delta_high_dose_df, "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Figures/Working Figures for Submission/Supplementary Tables/Table S3 Delta DEG Tables for high-dose PfSPZ KSPZV1.xlsx")
+```
+
 
 ### Visualize GSEA data as bubble plot
 
@@ -327,7 +340,7 @@ addSmallLegend <- function(myPlot, pointSize = 4, textSize = 6, spaceLegend = 0.
 print(addSmallLegend(MyPlot))
 ```
 
-```{r plot gsea bubbleplot to pdf, echo=FALSE, include=FALSE}
+```{r plot gsea bubbleplot to pdf, echo=FALSE, eval=FALSE}
 # cairo_pdf(filename = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Figures/Working Figures for Submission/Fig 4G Delta DGE EdgeR Bubble Plot 09282021.pdf",
 #           height = 3.7,
 #           width = 6)
