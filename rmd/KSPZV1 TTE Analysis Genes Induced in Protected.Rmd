@@ -1,0 +1,230 @@
+---
+title: "PfSPZ PfSPZ-Induced Features that Predict Protection by TTE"
+author: "Tuan M. Tran"
+date: "10/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ComplexHeatmap)
+library(tidyverse)
+require(miscTools)
+library(circlize)
+library(gtools)
+library(survival)
+library(survminer)
+```
+
+### Objective
+
+Use a rational approach to determine which features can distinguish between vaccine-induced protecte and not protected.
+
+Criteria:
+
+  1. Gene is differentially expressed in delta P vs delta S analysis in high-dose PfSPZ (p<0.005)
+  2. Gene induced post-vax in high-dose PfSPZ protected (p<0.05)
+  3. Gene downregulated post-vax in high-dose PfSPZ NOT protected (p<0.15)
+
+### Read-in data and filter
+
+```{r read in data, echo=TRUE, message=FALSE, warning=FALSE}
+#from google drive
+temp <- tempfile(fileext = ".rds")
+dl <- googledrive::drive_download(
+  googledrive::as_id("1R8bLYmyp95h9NVtP6hmNqSwzi51ujKgf"), path = temp, overwrite = TRUE)
+deltaDEGs <- readxl::read_excel(dl$local_path)
+#1 
+deltadelta <- deltaDEGs %>%
+  filter(comparison == "ΔP vs ΔNP" & PValue < 0.005)
+#2
+deltaprotected <- deltaDEGs %>%
+  filter(comparison == "ΔP" & logFC > 0 & PValue < 0.05)
+#3
+deltaprotectedNotprotected <- deltaDEGs %>%
+  filter(comparison == "ΔNP" & logFC < 0 & PValue < 0.1)
+
+allDat <- rbind(deltadelta, deltaprotected, deltaprotectedNotprotected) %>%
+  select(hgnc_symbol, description, logFC, PValue, FDR, comparison) %>%
+  pivot_wider(names_from = comparison, values_from = c(logFC, PValue, FDR)) %>%
+  filter(complete.cases(.))
+
+myGenes <- allDat$hgnc_symbol
+```
+
+### Table of filtered genes
+
+Figure 4H in preprint
+
+```{r table of filtered genes, echo = FALSE, message=FALSE, warning=FALSE}
+knitr::kable(allDat[,c(1,2,3,6,4,7,5,8)])
+```
+
+```{r check nanostring list, echo = FALSE, eval=FALSE}
+#get existing Nanostring list
+nanostring <- readxl::read_excel("/Volumes/GoogleDrive/My Drive/Tran Lab Shared/Projects/Doris Duke PfSPZ Kenya/PfSPZ Nanostring Validation/NanoString PlexSet Design Tran_IU/Nanostring Validation Archive/Tran_IU_Hs_2_C3290-Summary.xlsx", range = "B3:M67", sheet = 1)
+
+intersect(nanostring$`Customer Name`,myGenes)
+```
+
+### Load ExpressionSet
+
+```{r load cpm eset, echo=TRUE, message=FALSE, warning=FALSE}
+#from google drive
+temp <- tempfile(fileext = ".rds")
+dl <- googledrive::drive_download(
+  googledrive::as_id("123ihYx1ykdAvkMq7950yDLPSCTrSH089"), path = temp, overwrite = TRUE)
+x <- readRDS(file = dl$local_path)
+x$treat <- factor(x$treat, levels = c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+x$Timepoint <- as.integer(x$Timepoint)
+```
+
+### Reduce samples and genes
+
+```{r reduce, echo=TRUE, message=FALSE, warning=FALSE}
+#from google drive
+temp <- tempfile(fileext = ".rds")
+dl <- googledrive::drive_download(
+  googledrive::as_id("1k7olH6JtFd_hjRELj_HPmva7HZJqOEYt"), path = temp, overwrite = TRUE)
+AllSPZSubjects <- readRDS(file = dl$local_path)
+x <- x[,which(x$PATID %in% AllSPZSubjects)]
+x <- x[,x$treat != "Placebo"]
+x <- x[which(fData(x)$GeneSymbol %in% myGenes),]
+rownames(x) <-  fData(x)$GeneSymbol
+```
+
+### Reshape, join, make survival table
+
+```{r reshape and merge, echo=TRUE, message=FALSE, warning=FALSE}
+cpm_lfc_mat <- pData(x) %>%
+  mutate(Outcome = ifelse(mal.atp.3 == 1, "not protected", "protected")) %>%
+  dplyr::select(SAMPLEID, PATID, Timepoint, Outcome) %>%
+  left_join(., exprs(x) %>%
+              t() %>%
+              as.data.frame() %>%
+              rownames_to_column(var = "SAMPLEID"),
+            by = "SAMPLEID") %>%
+  dplyr::select(-c(SAMPLEID)) %>%
+  arrange(PATID, Timepoint) %>%
+  pivot_longer(cols = 4:ncol(.), names_to = "GeneSymbol", values_to = "logCPM") %>%
+  pivot_wider(names_from = "Timepoint", values_from = "logCPM") %>%
+  mutate(logFC = `25`-`0`) %>%
+  dplyr::select(PATID, GeneSymbol, logFC) %>%
+  pivot_wider(names_from = GeneSymbol, values_from = logFC) %>%
+  column_to_rownames(var = "PATID") %>%
+  t() %>%
+  as.data.frame()%>%
+  dplyr::select(pData(x)[pData(x)$Timepoint==0,]$PATID)
+
+x_delta <- x[,pData(x)$Timepoint==0]
+rownames(pData(x_delta)) <- x_delta$PATID
+Biobase::exprs(x_delta) <- as.matrix(cpm_lfc_mat)
+
+survdat <- Biobase::exprs(x_delta) %>%
+        as.data.frame() %>%
+        rownames_to_column(var = "GeneSymbol") %>%
+        dplyr::select(GeneSymbol, everything()) %>%
+        pivot_longer(2:ncol(.), names_to = "PATID", values_to = "expression") %>%
+        group_by(GeneSymbol) %>%
+        mutate(exprs_up_down = factor(ifelse(expression>0, "induced", "not induced"), levels = c("not induced", "induced"))) %>%
+        left_join(., fData(x_delta) %>%
+                    dplyr::select(c(GeneSymbol, description)), by = "GeneSymbol") %>%
+        left_join(., pData(x_delta) %>%
+                    mutate(Outcome = ifelse(mal.atp.3 == 1, "not protected", "protected")) %>%
+                    dplyr::select(c(SAMPLEID, PATID, Timepoint, treat, Outcome, site, SEX, age.vax1, mal.dvax, mal.dvax.tot, contains("atp"))), by = "PATID") %>%
+        mutate(exprs_up_down_outcome = paste(Outcome, exprs_up_down, sep = " "))
+```
+
+### Kaplan-Meier plots
+
+RP3-330M21.5 and ST3GAL3 are in Figure 4I of preprint
+
+```{r km plots, echo=TRUE, message=FALSE, warning=FALSE}
+myFollowup <- 6 #3 or 6
+N <- length(unique(survdat$PATID))
+survdat.filtered <- fit <- mySurvPlot <- c()
+for(i in myGenes){
+  survdat.filtered[[i]] <- survdat %>%
+    filter(GeneSymbol == i)
+  fit[[i]] <- survfit(Surv(tte.mal.atp.6, mal.atp.6) ~ exprs_up_down, data= survdat.filtered[[i]])
+  mySurvPlot[[i]] <- ggsurvplot(fit[[i]], risk.table = TRUE, pval = TRUE,
+                                break.time.by = 30, title = unique(survdat.filtered[[i]]$GeneSymbol),
+                                xlab = "Days since vaccination",
+                                ylab = "% free of parasitemia",
+                                censor = TRUE,
+                                palette = "lancet",
+                                conf.int = TRUE,
+                                conf.int.alpha = 0.1,
+                                font.family = "Arial")
+}
+```
+
+
+```{r print km plots, echo = FALSE, fig.align='center', fig.height = 5, fig.width = 6}
+for(i in myGenes){
+  plot.new()
+  print(mySurvPlot[[i]], newpage = FALSE)
+}
+```
+
+```{r print invidividual plots, echo=FALSE, include=FALSE}
+tempdir <- "/Volumes/GoogleDrive/My Drive/Tran Lab Shared/Projects/Doris Duke PfSPZ Kenya/Tuan PfSPZ/KenyaPfSPZ/PfSPZ_R_Figures/"
+cairo_pdf(filename = paste0(tempdir,"KSPZV1 Fig 4I Delta KM ST3GAL3.pdf"), width = 5.5, height = 5.5)
+print(mySurvPlot$ST3GAL3)
+dev.off()
+
+cairo_pdf(filename = paste0(tempdir,"KSPZV1 Fig 4I Delta KM RP3.pdf"), width = 5.5, height = 5.5)
+print(mySurvPlot$`RP3-330M21.5`)
+dev.off()
+```
+
+### Cox Regression
+
+```{r do cox regression to separate dose groups, echo=TRUE, message=FALSE, warning=FALSE}
+cox.res <- c()
+for(i in names(survdat.filtered)){
+  survdat.cp <- survdat.filtered[[i]]
+  survdat.cp$start		<-		0
+  survdat.cp$stop		<-		survdat.cp$tte.mal.atp.6
+  subj.pcrp <- rep(survdat.cp$start, as.vector(table(survdat.cp$SAMPLEID)))
+  survdat.cp$start1 <- survdat.cp$start-subj.pcrp
+  survdat.cp$stop1 <- survdat.cp$stop-subj.pcrp
+  survdat.cp <- survdat.cp %>%
+    dplyr::filter(stop1 > 0) %>%
+    droplevels()
+  fit <- coxph(Surv(start1, stop1, mal.atp.6) ~ exprs_up_down + age.vax1 + as.factor(site) + as.factor(mal.dvax) + as.factor(treat), data = survdat.cp)
+  #vfit <- cox.zph(fit)
+  #par(mfrow=c(3,2))
+  #plot(vfit)
+  #cox.zph(fit)
+  #fit
+  cox.res[[i]] <- as.data.frame(cbind(fit$n, fit$nevent, summary(fit)$conf.int[,c(1,3:4)], summary(fit)$coefficient[,5]))
+  colnames(cox.res[[i]]) <- c("n","number of events","HR", "LCI", "UCI", "P value")
+  cox.res[[i]] <- cox.res[[i]] %>%
+    as.matrix() %>%
+    signif(., digits = 3) %>%
+    as.data.frame()
+  cox.res[[i]]$Gene <- i
+  rownames(cox.res[[i]]) <- c("upregulated post-vax (ref:downregulated post-vax)",
+                              "age (months)",
+                              "Wagai (ref:Siaya)",
+                              "Pf infection during vax period (ref:no Pf during vax period)",
+                              "9.0x10^5 PfSPZ (ref:4.5x10^5 PfSPZ)",
+                              "1.8x10^6 PfSPZ (ref:4.5x10^5 PfSPZ)")
+  cox.res[[i]] <- cox.res[[i]] %>%
+    rownames_to_column(var = "Covariate") %>%
+    dplyr::select(Gene, everything())
+  }
+  cox.res.bound <- bind_rows(cox.res, .id = "Gene")
+```
+
+### Table S4 of preprint
+
+```{r show table, echo=FALSE}
+  knitr::kable(cox.res.bound)
+```
+
+
+```{r write table to file, echo=FALSE, eval=FALSE}
+resdir <- "/Volumes/GoogleDrive/My Drive/Tran Lab Shared/Projects/Doris Duke PfSPZ Kenya/Tuan PfSPZ/KenyaPfSPZ/PfSPZ_R_Results/Cox results"
+writexl::write_xlsx(cox.res.bound, paste0(resdir, "Cox PH ", "for ", length(names(survdat.filtered)), " genes", " allVax postvax ", myFollowup, " mos_", Sys.Date(),".xlsx"))
+```

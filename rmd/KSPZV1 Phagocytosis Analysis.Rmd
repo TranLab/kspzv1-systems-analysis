@@ -25,8 +25,8 @@ myPath <- "/Volumes/GoogleDrive/My Drive/Tran Lab Shared/Projects/Doris Duke PfS
 ### Load data
 
 ```{r load data, echo=FALSE, message=FALSE, warning=FALSE}
-countdat <- readRDS(paste0(myPath,"PfSPZ_phagocytosis_allExperiments_Countdata_new_09212021.rds"))
-freqdat <- readRDS(paste0(myPath,"PfSPZ_phagocytosis_allExperiments_Freqdata_new1_09212021.rds"))
+countdat <- readRDS(paste0(myPath,"PfSPZ_phagocytosis_allExperiments_Countdata_10062021.rds"))
+freqdat <- readRDS(paste0(myPath,"PfSPZ_phagocytosis_allExperiments_Freqdata_10062021.rds"))
 ```
 
 ```{r clean data and correct inconsistent naming, echo=FALSE, include=FALSE}
@@ -39,12 +39,11 @@ freqdat_clean <- freqdat %>%
   mutate(Treatment = gsub("PfIRBC", "PfiRBC", Treatment)) %>%
   mutate(Treatment = gsub("No spz control", "no spz control", Treatment)) %>%
   mutate(Treatment = gsub("Imiquimod", "imiquimod", Treatment)) %>%
-  mutate(Treatment = factor(Treatment, levels = c("vehicle", "β-glucan", "CpG","LPS", "poly I:C", "flagellin", "imiquimod","sHz", "uRBC", "PfiRBC", "no spz control")))
+  mutate(Treatment = factor(Treatment, levels = c("vehicle", "β-glucan", "CpG","LPS", "poly I:C", "flagellin", "imiquimod")))
 ```
 
 ```{r plot freq, echo = FALSE, include=FALSE}
-mycomparisons <- list( c("vehicle", "β-glucan"), c("vehicle", "CpG"), c("vehicle", "LPS"), c("vehicle", "poly I:C"), c("vehicle", "flagellin"), c("vehicle", "imiquimod"),
-                       c("vehicle", "sHz"), c("vehicle", "uRBC"), c("vehicle", "PfiRBC"))
+mycomparisons <- list( c("vehicle", "β-glucan"), c("vehicle", "CpG"), c("vehicle", "LPS"), c("vehicle", "poly I:C"), c("vehicle", "flagellin"), c("vehicle", "imiquimod"))
 
 freqdat_clean %>%
   group_by(group, Treatment, Experiment, Gate) %>%
@@ -72,7 +71,7 @@ foodat <- countdat %>%
   mutate(Treatment = gsub("PfIRBC", "PfiRBC", Treatment)) %>%
   mutate(Treatment = gsub("No spz control", "no spz control", Treatment)) %>%
   mutate(Treatment = gsub("Imiquimod", "imiquimod", Treatment)) %>%
-  mutate(Treatment = factor(Treatment, levels = c("vehicle", "β-glucan", "CpG","LPS", "poly I:C", "flagellin", "imiquimod","sHz", "uRBC", "PfiRBC", "no spz control"))) %>%
+  mutate(Treatment = factor(Treatment, levels = c("vehicle", "β-glucan", "CpG","LPS", "poly I:C", "flagellin", "imiquimod"))) %>%
   mutate(Replicate = gsub(" ", "", Replicate)) %>%
   # mutate(Gate = gsub("\\+", "_pos", Gate)) %>%
   # mutate(Gate = gsub(" ", "_", Gate)) %>%
@@ -81,14 +80,12 @@ foodat <- countdat %>%
   # mutate(Gate = gsub("\\)", "", Gate)) %>%
   # mutate(Gate = make.names(Gate)) %>%
   pivot_wider(., names_from = Gate, values_from = Count) %>%
-  dplyr::select(-c(`% Phagocytosis`)) %>%
   mutate(across(c(5:ncol(.)), .fns = ~1000*(./`Hoechst+`))) %>%
   pivot_longer(., cols = 5:ncol(.), names_to = "Gate", values_to = "Frequency")
 ```
 
 ```{r plot freq 2, echo = FALSE, include=FALSE}
-mycomparisons <- list( c("vehicle", "β-glucan"), c("vehicle", "CpG"), c("vehicle", "LPS"), c("vehicle", "poly I:C"), c("vehicle", "flagellin"), c("vehicle", "imiquimod"),
-                       c("vehicle", "sHz"), c("vehicle", "uRBC"), c("vehicle", "PfiRBC"))
+mycomparisons <- list( c("vehicle", "β-glucan"), c("vehicle", "CpG"), c("vehicle", "LPS"), c("vehicle", "poly I:C"), c("vehicle", "flagellin"), c("vehicle", "imiquimod"))
 
 plotdat <- foodat %>%
   filter(Gate %in% c("Hoechst+Py+Total", "Hoechst+Py+Internal", "Hoechst+Py+External")) %>%
@@ -139,12 +136,11 @@ propdat <- countdat %>%
   mutate(Treatment = gsub("PfIRBC", "PfiRBC", Treatment)) %>%
   mutate(Treatment = gsub("No spz control", "no spz control", Treatment)) %>%
   mutate(Treatment = gsub("Imiquimod", "imiquimod", Treatment)) %>%
-  mutate(Treatment = factor(Treatment, levels = c("vehicle", "beta-glucan", "CpG","LPS", "poly I:C", "flagellin", "imiquimod","sHz", "uRBC", "PfiRBC", "no spz control"))) %>%
+  mutate(Treatment = factor(Treatment, levels = c("vehicle", "beta-glucan", "CpG","LPS", "poly I:C", "flagellin", "imiquimod"))) %>%
   mutate(Replicate = gsub(" ", "", Replicate)) %>%
   mutate(Experiment = factor(Experiment)) %>%
-  dplyr::select(-c(`% Phagocytosis`)) %>%
   filter(Gate %in% c("Hoechst+Py+Total", "Hoechst+Py+Internal", "Hoechst+Py+External", "Hoechst+"))  %>%
-  filter(Treatment %in% c("vehicle", "beta-glucan", "CpG","LPS", "poly I:C", "flagellin", "imiquimod","sHz", "uRBC", "PfiRBC"))  %>%
+  filter(Treatment %in% c("vehicle", "beta-glucan", "CpG","LPS", "poly I:C", "flagellin", "imiquimod"))  %>%
   dplyr::select(-c(group, Replicate)) %>%
   group_by(Experiment, Treatment, Gate) %>%
   summarise(Count = sum(Count)) %>%
@@ -152,7 +148,7 @@ propdat <- countdat %>%
   droplevels()
 
 fetdat <- tempdat <- mydat <- mydat_bound <- fetres <- Exp_annot <- c()
-for(i in c("beta-glucan", "CpG","LPS", "poly I:C", "flagellin", "imiquimod","sHz", "uRBC", "PfiRBC")){
+for(i in c("beta-glucan", "CpG","LPS", "poly I:C", "flagellin", "imiquimod")){
   tempdat[[i]] <- propdat[propdat$Treatment == i,] %>%
     droplevels
    for(j in unique(tempdat[[i]]$Experiment)){
@@ -203,7 +199,7 @@ knitr::kable(allfets %>%
                mutate(across(c(2:6,11), scales::scientific, 3)) %>%
                dplyr::select(12,2:5,11))
 knitr::kable(allfets %>%
-               mutate(across(c(2:6,11), scales::scientific, 3)) 
+               mutate(across(c(2:6,11), scales::scientific, 3)))
 
 ```
 

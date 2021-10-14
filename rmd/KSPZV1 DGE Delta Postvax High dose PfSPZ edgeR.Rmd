@@ -118,13 +118,9 @@ for(i in names(ygroup)){
 }
 ```
 
-### Design Matrix - Compare Protected (0) vs Not Protected (1)
+### Design Matrix - Compare Protected vs Not Protected
 
-Create design matrix according to EdgeR user guide (Ch 3.5 Comparisons Both Between and Within Subjects)  
-
-### Analysis between Protected and Susceptible within a Dose Group
-
-This chunk is the analysis used for final submission.
+Analysis between Protected and Not Protected within a Dose Group
 
 ```{r, build design matrix afs protected vs susceptible by group, message=FALSE, warning=FALSE}
 DeltaDelta <- DeltaNotProtected <- DeltaProtected <- fit <- design <- xgroup
@@ -137,13 +133,15 @@ for(i in names(xgroup)){
   Batch <- factor(xgroup[[i]]$SEQBATCH, levels = c("Aug2019","Nov2019"))
   MALdVax <- factor(xgroup[[i]]$mal.dvax, levels = c(0,1), labels = c("noMALdVAX","yesMALdVAX"))
   CSPAb_baseline <- as.numeric(xgroup[[i]]$pfcsp_pre)
-  CSPAb_baseline[is.na(CSPAb_baseline)] <- median(CSPAb_baseline, na.rm = TRUE) #Impute 2 missing values with median of all samples
+  #Impute 2 missing values with median of all samples
+  CSPAb_baseline[is.na(CSPAb_baseline)] <- median(CSPAb_baseline, na.rm = TRUE) 
   #Define protective outcome-specific PfSPZ Vaccination effects and append them to the design matrix
   Protected.Postvax <- Outcome == "Protected" & Timepoint=="postvax"
   NotProtected.Postvax <- Outcome =="NotProtected" & Timepoint=="postvax"
   design[[i]] <- model.matrix(~Subject)
-  design[[i]] <- cbind(design[[i]], Protected.Postvax, NotProtected.Postvax) #make design matrix according to edgeR 3.5 (p42)
+  #make design matrix according to edgeR 3.5 (p42)
   #https://www.bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf
+  design[[i]] <- cbind(design[[i]], Protected.Postvax, NotProtected.Postvax) 
   rownames(design[[i]]) <- xgroup[[i]]$PATID
   print(i)
   print(colnames(design[[i]])) #check colnames
@@ -163,19 +161,22 @@ for(i in names(xgroup)){
 Δ Protected 
 
 ```{r DEG table placebo, echo = FALSE, message=FALSE, warning=FALSE}
-knitr::kable(DeltaProtected$`1.8 x 10^6 PfSPZ`[1:15,])
+knitr::kable(DeltaProtected$`1.8 x 10^6 PfSPZ`[1:15,8:14] %>%
+               dplyr::rename(Description = descripton_new))
 ```
 
 Δ Not Protected
 
 ```{r DEG table low dose, echo = FALSE, message=FALSE, warning=FALSE}
-knitr::kable(DeltaNotProtected$`1.8 x 10^6 PfSPZ`[1:15,])
+knitr::kable(DeltaNotProtected$`1.8 x 10^6 PfSPZ`[1:15,8:14] %>%
+               dplyr::rename(Description = descripton_new))
 ```
 
 Δ Protected vs. Δ Not Protected
 
 ```{r DEG table med dose, echo = FALSE, message=FALSE, warning=FALSE}
-knitr::kable(DeltaDelta$`1.8 x 10^6 PfSPZ`[1:15,])
+knitr::kable(DeltaDelta$`1.8 x 10^6 PfSPZ`[1:15,8:14] %>%
+               dplyr::rename(Description = descripton_new))
 ```
 
 Gene-level
@@ -277,7 +278,6 @@ delta_high_dose_df <- bind_rows(degtabs$`1.8 x 10^6 PfSPZ`, .id = "comparison") 
   dplyr::select(study, treatment, timepoint, comparison, hgnc_symbol, ensembl_id, description, logFC, logCPM, F, PValue, FDR)
 # writexl::write_xlsx(delta_high_dose_df, "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Figures/Working Figures for Submission/Supplementary Tables/Table S3 Delta DEG Tables for high-dose PfSPZ KSPZV1.xlsx")
 ```
-
 
 ### Visualize GSEA data as bubble plot
 

@@ -302,13 +302,9 @@ for(i in names(ygroup)){
                            phenoData = AnnotatedDataFrame(pData(xgroup[[i]])[myintersection,]))
 }</code></pre>
 </div>
-<div id="design-matrix---compare-protected-0-vs-not-protected-1" class="section level3">
-<h3>Design Matrix - Compare Protected (0) vs Not Protected (1)</h3>
-<p>Create design matrix according to EdgeR user guide (Ch 3.5 Comparisons Both Between and Within Subjects)</p>
-</div>
-<div id="analysis-between-protected-and-susceptible-within-a-dose-group" class="section level3">
-<h3>Analysis between Protected and Susceptible within a Dose Group</h3>
-<p>This chunk is the analysis used for final submission.</p>
+<div id="design-matrix---compare-protected-vs-not-protected" class="section level3">
+<h3>Design Matrix - Compare Protected vs Not Protected</h3>
+<p>Analysis between Protected and Not Protected within a Dose Group</p>
 <pre class="r"><code>DeltaDelta &lt;- DeltaNotProtected &lt;- DeltaProtected &lt;- fit &lt;- design &lt;- xgroup
 for(i in names(xgroup)){
   Subject &lt;- factor(xgroup[[i]]$PATID)
@@ -319,13 +315,15 @@ for(i in names(xgroup)){
   Batch &lt;- factor(xgroup[[i]]$SEQBATCH, levels = c(&quot;Aug2019&quot;,&quot;Nov2019&quot;))
   MALdVax &lt;- factor(xgroup[[i]]$mal.dvax, levels = c(0,1), labels = c(&quot;noMALdVAX&quot;,&quot;yesMALdVAX&quot;))
   CSPAb_baseline &lt;- as.numeric(xgroup[[i]]$pfcsp_pre)
-  CSPAb_baseline[is.na(CSPAb_baseline)] &lt;- median(CSPAb_baseline, na.rm = TRUE) #Impute 2 missing values with median of all samples
+  #Impute 2 missing values with median of all samples
+  CSPAb_baseline[is.na(CSPAb_baseline)] &lt;- median(CSPAb_baseline, na.rm = TRUE) 
   #Define protective outcome-specific PfSPZ Vaccination effects and append them to the design matrix
   Protected.Postvax &lt;- Outcome == &quot;Protected&quot; &amp; Timepoint==&quot;postvax&quot;
   NotProtected.Postvax &lt;- Outcome ==&quot;NotProtected&quot; &amp; Timepoint==&quot;postvax&quot;
   design[[i]] &lt;- model.matrix(~Subject)
-  design[[i]] &lt;- cbind(design[[i]], Protected.Postvax, NotProtected.Postvax) #make design matrix according to edgeR 3.5 (p42)
+  #make design matrix according to edgeR 3.5 (p42)
   #https://www.bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf
+  design[[i]] &lt;- cbind(design[[i]], Protected.Postvax, NotProtected.Postvax) 
   rownames(design[[i]]) &lt;- xgroup[[i]]$PATID
   print(i)
   print(colnames(design[[i]])) #check colnames
@@ -364,35 +362,21 @@ for(i in names(xgroup)){
 <div id="examine-top-15-degs-in-1.8x106-pfspz-dose-group" class="section level3">
 <h3>Examine top 15 DEGs in 1.8x10^6 PfSPZ dose group</h3>
 <p>Δ Protected</p>
-<table>
+<table style="width:100%;">
 <colgroup>
-<col width="4%" />
-<col width="3%" />
-<col width="3%" />
-<col width="2%" />
-<col width="2%" />
-<col width="3%" />
-<col width="30%" />
-<col width="3%" />
-<col width="25%" />
-<col width="4%" />
-<col width="3%" />
-<col width="2%" />
-<col width="2%" />
-<col width="2%" />
-<col width="2%" />
+<col width="9%" />
+<col width="52%" />
+<col width="9%" />
+<col width="6%" />
+<col width="5%" />
+<col width="5%" />
+<col width="5%" />
+<col width="5%" />
 </colgroup>
 <thead>
 <tr class="header">
 <th align="left"></th>
-<th align="left">Geneid</th>
-<th align="left">Chromosome</th>
-<th align="left">Start</th>
-<th align="left">End</th>
-<th align="left">Probe.Strand</th>
 <th align="left">Description</th>
-<th align="left">GeneSymbol</th>
-<th align="left">descripton_new</th>
 <th align="left">EnsemblID</th>
 <th align="right">logFC</th>
 <th align="right">logCPM</th>
@@ -404,13 +388,6 @@ for(i in names(xgroup)){
 <tbody>
 <tr class="odd">
 <td align="left">ENSG00000137815</td>
-<td align="left">RTF1</td>
-<td align="left">15</td>
-<td align="left">41408408</td>
-<td align="left">41483563</td>
-<td align="left">+</td>
-<td align="left">Rtf1, Paf1/RNA polymerase II complex component, homolog (S. cerevisiae) [Source:HGNC Symbol;Acc:HGNC:28996]</td>
-<td align="left">RTF1</td>
 <td align="left">RTF1 homolog, Paf1/RNA polymerase II complex component [Source:HGNC Symbol;Acc:HGNC:28996]</td>
 <td align="left">ENSG00000137815</td>
 <td align="right">-0.2803414</td>
@@ -421,13 +398,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000108389</td>
-<td align="left">MTMR4</td>
-<td align="left">17</td>
-<td align="left">58489529</td>
-<td align="left">58517905</td>
-<td align="left">-</td>
-<td align="left">myotubularin related protein 4 [Source:HGNC Symbol;Acc:HGNC:7452]</td>
-<td align="left">MTMR4</td>
 <td align="left">myotubularin related protein 4 [Source:HGNC Symbol;Acc:HGNC:7452]</td>
 <td align="left">ENSG00000108389</td>
 <td align="right">-0.2375128</td>
@@ -438,13 +408,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000270641</td>
-<td align="left">TSIX</td>
-<td align="left">X</td>
-<td align="left">73792205</td>
-<td align="left">73829231</td>
-<td align="left">+</td>
-<td align="left">TSIX transcript, XIST antisense RNA [Source:HGNC Symbol;Acc:HGNC:12377]</td>
-<td align="left">TSIX</td>
 <td align="left">TSIX transcript, XIST antisense RNA [Source:HGNC Symbol;Acc:HGNC:12377]</td>
 <td align="left">ENSG00000270641</td>
 <td align="right">9.2868728</td>
@@ -455,13 +418,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000266086</td>
-<td align="left">RP11-159D12.5</td>
-<td align="left">17</td>
-<td align="left">57989038</td>
-<td align="left">58005253</td>
-<td align="left">-</td>
-<td align="left">Uncharacterized protein {ECO:0000313|Ensembl:ENSP00000463235} [Source:UniProtKB/TrEMBL;Acc:J3QKU1]</td>
-<td align="left">RP11-159D12.5</td>
 <td align="left">novel transcript</td>
 <td align="left">ENSG00000266086</td>
 <td align="right">-0.3077507</td>
@@ -472,13 +428,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000134684</td>
-<td align="left">YARS</td>
-<td align="left">1</td>
-<td align="left">32775237</td>
-<td align="left">32818153</td>
-<td align="left">-</td>
-<td align="left">tyrosyl-tRNA synthetase [Source:HGNC Symbol;Acc:HGNC:12840]</td>
-<td align="left">YARS1</td>
 <td align="left">tyrosyl-tRNA synthetase 1 [Source:HGNC Symbol;Acc:HGNC:12840]</td>
 <td align="left">ENSG00000134684</td>
 <td align="right">-0.2556819</td>
@@ -489,13 +438,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000088930</td>
-<td align="left">XRN2</td>
-<td align="left">20</td>
-<td align="left">21303304</td>
-<td align="left">21389827</td>
-<td align="left">+</td>
-<td align="left">5’-3’ exoribonuclease 2 [Source:HGNC Symbol;Acc:HGNC:12836]</td>
-<td align="left">XRN2</td>
 <td align="left">5’-3’ exoribonuclease 2 [Source:HGNC Symbol;Acc:HGNC:12836]</td>
 <td align="left">ENSG00000088930</td>
 <td align="right">-0.2386948</td>
@@ -506,13 +448,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000150991</td>
-<td align="left">UBC</td>
-<td align="left">12</td>
-<td align="left">124911604</td>
-<td align="left">124917368</td>
-<td align="left">-</td>
-<td align="left">ubiquitin C [Source:HGNC Symbol;Acc:HGNC:12468]</td>
-<td align="left">UBC</td>
 <td align="left">ubiquitin C [Source:HGNC Symbol;Acc:HGNC:12468]</td>
 <td align="left">ENSG00000150991</td>
 <td align="right">-0.3626272</td>
@@ -523,13 +458,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000163798</td>
-<td align="left">SLC4A1AP</td>
-<td align="left">2</td>
-<td align="left">27663471</td>
-<td align="left">27694976</td>
-<td align="left">+</td>
-<td align="left">solute carrier family 4 (anion exchanger), member 1, adaptor protein [Source:HGNC Symbol;Acc:HGNC:13813]</td>
-<td align="left">SLC4A1AP</td>
 <td align="left">solute carrier family 4 member 1 adaptor protein [Source:HGNC Symbol;Acc:HGNC:13813]</td>
 <td align="left">ENSG00000163798</td>
 <td align="right">-0.2590640</td>
@@ -540,13 +468,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000009724</td>
-<td align="left">MASP2</td>
-<td align="left">1</td>
-<td align="left">11026523</td>
-<td align="left">11047233</td>
-<td align="left">-</td>
-<td align="left">mannan-binding lectin serine peptidase 2 [Source:HGNC Symbol;Acc:HGNC:6902]</td>
-<td align="left">MASP2</td>
 <td align="left">mannan binding lectin serine peptidase 2 [Source:HGNC Symbol;Acc:HGNC:6902]</td>
 <td align="left">ENSG00000009724</td>
 <td align="right">0.3235910</td>
@@ -557,13 +478,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000115053</td>
-<td align="left">NCL</td>
-<td align="left">2</td>
-<td align="left">231453531</td>
-<td align="left">231483641</td>
-<td align="left">-</td>
-<td align="left">nucleolin [Source:HGNC Symbol;Acc:HGNC:7667]</td>
-<td align="left">NCL</td>
 <td align="left">nucleolin [Source:HGNC Symbol;Acc:HGNC:7667]</td>
 <td align="left">ENSG00000115053</td>
 <td align="right">-0.2932576</td>
@@ -574,13 +488,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000147010</td>
-<td align="left">SH3KBP1</td>
-<td align="left">X</td>
-<td align="left">19533975</td>
-<td align="left">19887601</td>
-<td align="left">-</td>
-<td align="left">SH3-domain kinase binding protein 1 [Source:HGNC Symbol;Acc:HGNC:13867]</td>
-<td align="left">SH3KBP1</td>
 <td align="left">SH3 domain containing kinase binding protein 1 [Source:HGNC Symbol;Acc:HGNC:13867]</td>
 <td align="left">ENSG00000147010</td>
 <td align="right">-0.2594048</td>
@@ -591,13 +498,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000214753</td>
-<td align="left">HNRNPUL2</td>
-<td align="left">11</td>
-<td align="left">62712630</td>
-<td align="left">62727349</td>
-<td align="left">-</td>
-<td align="left">heterogeneous nuclear ribonucleoprotein U- like 2 [Source:HGNC Symbol;Acc:HGNC:25451]</td>
-<td align="left">HNRNPUL2</td>
 <td align="left">heterogeneous nuclear ribonucleoprotein U like 2 [Source:HGNC Symbol;Acc:HGNC:25451]</td>
 <td align="left">ENSG00000214753</td>
 <td align="right">-0.3377733</td>
@@ -608,13 +508,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000160208</td>
-<td align="left">RRP1B</td>
-<td align="left">21</td>
-<td align="left">43659548</td>
-<td align="left">43696079</td>
-<td align="left">+</td>
-<td align="left">ribosomal RNA processing 1B [Source:HGNC Symbol;Acc:HGNC:23818]</td>
-<td align="left">RRP1B</td>
 <td align="left">ribosomal RNA processing 1B [Source:HGNC Symbol;Acc:HGNC:23818]</td>
 <td align="left">ENSG00000160208</td>
 <td align="right">-0.2596929</td>
@@ -625,13 +518,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000198431</td>
-<td align="left">TXNRD1</td>
-<td align="left">12</td>
-<td align="left">104215779</td>
-<td align="left">104350305</td>
-<td align="left">+</td>
-<td align="left">thioredoxin reductase 1 [Source:HGNC Symbol;Acc:HGNC:12437]</td>
-<td align="left">TXNRD1</td>
 <td align="left">thioredoxin reductase 1 [Source:HGNC Symbol;Acc:HGNC:12437]</td>
 <td align="left">ENSG00000198431</td>
 <td align="right">-0.2422311</td>
@@ -642,13 +528,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000148826</td>
-<td align="left">NKX6-2</td>
-<td align="left">10</td>
-<td align="left">132783179</td>
-<td align="left">132786052</td>
-<td align="left">-</td>
-<td align="left">NK6 homeobox 2 [Source:HGNC Symbol;Acc:HGNC:19321]</td>
-<td align="left">NKX6-2</td>
 <td align="left">NK6 homeobox 2 [Source:HGNC Symbol;Acc:HGNC:19321]</td>
 <td align="left">ENSG00000148826</td>
 <td align="right">1.0946185</td>
@@ -662,33 +541,19 @@ for(i in names(xgroup)){
 <p>Δ Not Protected</p>
 <table>
 <colgroup>
-<col width="4%" />
-<col width="4%" />
-<col width="3%" />
-<col width="3%" />
-<col width="3%" />
-<col width="3%" />
-<col width="27%" />
-<col width="4%" />
-<col width="27%" />
-<col width="4%" />
-<col width="3%" />
-<col width="3%" />
-<col width="3%" />
-<col width="3%" />
-<col width="1%" />
+<col width="9%" />
+<col width="53%" />
+<col width="9%" />
+<col width="6%" />
+<col width="6%" />
+<col width="5%" />
+<col width="5%" />
+<col width="2%" />
 </colgroup>
 <thead>
 <tr class="header">
 <th align="left"></th>
-<th align="left">Geneid</th>
-<th align="left">Chromosome</th>
-<th align="left">Start</th>
-<th align="left">End</th>
-<th align="left">Probe.Strand</th>
 <th align="left">Description</th>
-<th align="left">GeneSymbol</th>
-<th align="left">descripton_new</th>
 <th align="left">EnsemblID</th>
 <th align="right">logFC</th>
 <th align="right">logCPM</th>
@@ -700,13 +565,6 @@ for(i in names(xgroup)){
 <tbody>
 <tr class="odd">
 <td align="left">ENSG00000257167</td>
-<td align="left">TMPO-AS1</td>
-<td align="left">12</td>
-<td align="left">98512973</td>
-<td align="left">98516422</td>
-<td align="left">-</td>
-<td align="left">TMPO antisense RNA 1 [Source:HGNC Symbol;Acc:HGNC:44158]</td>
-<td align="left">TMPO-AS1</td>
 <td align="left">TMPO antisense RNA 1 [Source:HGNC Symbol;Acc:HGNC:44158]</td>
 <td align="left">ENSG00000257167</td>
 <td align="right">0.3996496</td>
@@ -717,13 +575,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000171954</td>
-<td align="left">CYP4F22</td>
-<td align="left">19</td>
-<td align="left">15508493</td>
-<td align="left">15552317</td>
-<td align="left">+</td>
-<td align="left">cytochrome P450, family 4, subfamily F, polypeptide 22 [Source:HGNC Symbol;Acc:HGNC:26820]</td>
-<td align="left">CYP4F22</td>
 <td align="left">cytochrome P450 family 4 subfamily F member 22 [Source:HGNC Symbol;Acc:HGNC:26820]</td>
 <td align="left">ENSG00000171954</td>
 <td align="right">1.8843383</td>
@@ -734,13 +585,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000232807</td>
-<td align="left">RP11-536K7.3</td>
-<td align="left">10</td>
-<td align="left">5934270</td>
-<td align="left">5945900</td>
-<td align="left">-</td>
-<td align="left">No description</td>
-<td align="left">RP11-536K7.3</td>
 <td align="left">novel transcript, antisense to FBXO18</td>
 <td align="left">ENSG00000232807</td>
 <td align="right">-0.3454261</td>
@@ -751,13 +595,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000258964</td>
-<td align="left">RP11-618G20.1</td>
-<td align="left">14</td>
-<td align="left">61734138</td>
-<td align="left">61776260</td>
-<td align="left">+</td>
-<td align="left">No description</td>
-<td align="left">RP11-618G20.1</td>
 <td align="left">novel transcript</td>
 <td align="left">ENSG00000258964</td>
 <td align="right">-0.3786361</td>
@@ -768,13 +605,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000119711</td>
-<td align="left">ALDH6A1</td>
-<td align="left">14</td>
-<td align="left">74056850</td>
-<td align="left">74084493</td>
-<td align="left">-</td>
-<td align="left">aldehyde dehydrogenase 6 family, member A1 [Source:HGNC Symbol;Acc:HGNC:7179]</td>
-<td align="left">ALDH6A1</td>
 <td align="left">aldehyde dehydrogenase 6 family member A1 [Source:HGNC Symbol;Acc:HGNC:7179]</td>
 <td align="left">ENSG00000119711</td>
 <td align="right">-0.4079183</td>
@@ -785,13 +615,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000140612</td>
-<td align="left">SEC11A</td>
-<td align="left">15</td>
-<td align="left">84669538</td>
-<td align="left">84716716</td>
-<td align="left">-</td>
-<td align="left">SEC11 homolog A (S. cerevisiae) [Source:HGNC Symbol;Acc:HGNC:17718]</td>
-<td align="left">SEC11A</td>
 <td align="left">SEC11 homolog A, signal peptidase complex subunit [Source:HGNC Symbol;Acc:HGNC:17718]</td>
 <td align="left">ENSG00000140612</td>
 <td align="right">0.2885858</td>
@@ -802,13 +625,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000262874</td>
-<td align="left">C19orf84</td>
-<td align="left">19</td>
-<td align="left">51388289</td>
-<td align="left">51390574</td>
-<td align="left">-</td>
-<td align="left">chromosome 19 open reading frame 84 [Source:HGNC Symbol;Acc:HGNC:27112]</td>
-<td align="left">C19orf84</td>
 <td align="left">chromosome 19 open reading frame 84 [Source:HGNC Symbol;Acc:HGNC:27112]</td>
 <td align="left">ENSG00000262874</td>
 <td align="right">1.4947230</td>
@@ -819,13 +635,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000213889</td>
-<td align="left">PPM1N</td>
-<td align="left">19</td>
-<td align="left">45488777</td>
-<td align="left">45502510</td>
-<td align="left">+</td>
-<td align="left">protein phosphatase, Mg2+/Mn2+ dependent, 1N (putative) [Source:HGNC Symbol;Acc:HGNC:26845]</td>
-<td align="left">PPM1N</td>
 <td align="left">protein phosphatase, Mg2+/Mn2+ dependent 1N (putative) [Source:HGNC Symbol;Acc:HGNC:26845]</td>
 <td align="left">ENSG00000213889</td>
 <td align="right">0.7943274</td>
@@ -836,13 +645,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000157837</td>
-<td align="left">SPPL3</td>
-<td align="left">12</td>
-<td align="left">120762510</td>
-<td align="left">120904371</td>
-<td align="left">-</td>
-<td align="left">signal peptide peptidase like 3 [Source:HGNC Symbol;Acc:HGNC:30424]</td>
-<td align="left">SPPL3</td>
 <td align="left">signal peptide peptidase like 3 [Source:HGNC Symbol;Acc:HGNC:30424]</td>
 <td align="left">ENSG00000157837</td>
 <td align="right">-0.2108694</td>
@@ -853,13 +655,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000137075</td>
-<td align="left">RNF38</td>
-<td align="left">9</td>
-<td align="left">36336396</td>
-<td align="left">36487548</td>
-<td align="left">-</td>
-<td align="left">ring finger protein 38 [Source:HGNC Symbol;Acc:HGNC:18052]</td>
-<td align="left">RNF38</td>
 <td align="left">ring finger protein 38 [Source:HGNC Symbol;Acc:HGNC:18052]</td>
 <td align="left">ENSG00000137075</td>
 <td align="right">-0.1877806</td>
@@ -870,13 +665,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000183474</td>
-<td align="left">GTF2H2C</td>
-<td align="left">5</td>
-<td align="left">69560208</td>
-<td align="left">69594723</td>
-<td align="left">+</td>
-<td align="left">GTF2H2 family member C [Source:HGNC Symbol;Acc:HGNC:31394]</td>
-<td align="left">GTF2H2C</td>
 <td align="left">GTF2H2 family member C [Source:HGNC Symbol;Acc:HGNC:31394]</td>
 <td align="left">ENSG00000183474</td>
 <td align="right">-3.5435798</td>
@@ -887,13 +675,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000211784</td>
-<td align="left">TRAV10</td>
-<td align="left">14</td>
-<td align="left">21825472</td>
-<td align="left">21826075</td>
-<td align="left">+</td>
-<td align="left">T cell receptor alpha variable 10 [Source:HGNC Symbol;Acc:HGNC:12103]</td>
-<td align="left">TRAV10</td>
 <td align="left">T cell receptor alpha variable 10 [Source:HGNC Symbol;Acc:HGNC:12103]</td>
 <td align="left">ENSG00000211784</td>
 <td align="right">-0.9467805</td>
@@ -904,13 +685,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000136950</td>
-<td align="left">ARPC5L</td>
-<td align="left">9</td>
-<td align="left">124862130</td>
-<td align="left">124877733</td>
-<td align="left">+</td>
-<td align="left">actin related protein 2/3 complex, subunit 5- like [Source:HGNC Symbol;Acc:HGNC:23366]</td>
-<td align="left">ARPC5L</td>
 <td align="left">actin related protein 2/3 complex subunit 5 like [Source:HGNC Symbol;Acc:HGNC:23366]</td>
 <td align="left">ENSG00000136950</td>
 <td align="right">0.2806224</td>
@@ -921,13 +695,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000279887</td>
-<td align="left">RP11-264L1.1</td>
-<td align="left">16</td>
-<td align="left">78525189</td>
-<td align="left">78526535</td>
-<td align="left">-</td>
-<td align="left">No description</td>
-<td align="left">RP11-264L1.1</td>
 <td align="left">TEC</td>
 <td align="left">ENSG00000279887</td>
 <td align="right">2.0070711</td>
@@ -938,13 +705,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000104472</td>
-<td align="left">CHRAC1</td>
-<td align="left">8</td>
-<td align="left">140511298</td>
-<td align="left">140517137</td>
-<td align="left">+</td>
-<td align="left">chromatin accessibility complex 1 [Source:HGNC Symbol;Acc:HGNC:13544]</td>
-<td align="left">CHRAC1</td>
 <td align="left">chromatin accessibility complex subunit 1 [Source:HGNC Symbol;Acc:HGNC:13544]</td>
 <td align="left">ENSG00000104472</td>
 <td align="right">-0.2303392</td>
@@ -958,33 +718,19 @@ for(i in names(xgroup)){
 <p>Δ Protected vs. Δ Not Protected</p>
 <table>
 <colgroup>
-<col width="4%" />
-<col width="4%" />
-<col width="3%" />
-<col width="2%" />
-<col width="2%" />
-<col width="3%" />
-<col width="30%" />
-<col width="4%" />
-<col width="25%" />
-<col width="4%" />
-<col width="3%" />
-<col width="2%" />
-<col width="2%" />
-<col width="2%" />
-<col width="2%" />
+<col width="9%" />
+<col width="51%" />
+<col width="9%" />
+<col width="6%" />
+<col width="5%" />
+<col width="5%" />
+<col width="5%" />
+<col width="5%" />
 </colgroup>
 <thead>
 <tr class="header">
 <th align="left"></th>
-<th align="left">Geneid</th>
-<th align="left">Chromosome</th>
-<th align="left">Start</th>
-<th align="left">End</th>
-<th align="left">Probe.Strand</th>
 <th align="left">Description</th>
-<th align="left">GeneSymbol</th>
-<th align="left">descripton_new</th>
 <th align="left">EnsemblID</th>
 <th align="right">logFC</th>
 <th align="right">logCPM</th>
@@ -996,13 +742,6 @@ for(i in names(xgroup)){
 <tbody>
 <tr class="odd">
 <td align="left">ENSG00000271793</td>
-<td align="left">RP11-321N4.5</td>
-<td align="left">6</td>
-<td align="left">85557978</td>
-<td align="left">85615234</td>
-<td align="left">-</td>
-<td align="left">No description</td>
-<td align="left">RP11-321N4.5</td>
 <td align="left">novel protein, SYNCRIP-SNX14 readthrough</td>
 <td align="left">ENSG00000271793</td>
 <td align="right">-0.4527771</td>
@@ -1013,13 +752,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000264920</td>
-<td align="left">RP11-6N17.4</td>
-<td align="left">17</td>
-<td align="left">47891255</td>
-<td align="left">47895812</td>
-<td align="left">-</td>
-<td align="left">No description</td>
-<td align="left">SP2-DT</td>
 <td align="left">SP2 divergent transcript [Source:HGNC Symbol;Acc:HGNC:55330]</td>
 <td align="left">ENSG00000264920</td>
 <td align="right">0.6785965</td>
@@ -1030,13 +762,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000259544</td>
-<td align="left">RP11-158M2.2</td>
-<td align="left">15</td>
-<td align="left">85726115</td>
-<td align="left">85727227</td>
-<td align="left">-</td>
-<td align="left">No description</td>
-<td align="left">RP11-158M2.2</td>
 <td align="left">novel transcript, antisense to AKAP13</td>
 <td align="left">ENSG00000259544</td>
 <td align="right">-0.5316316</td>
@@ -1047,13 +772,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000158604</td>
-<td align="left">TMED4</td>
-<td align="left">7</td>
-<td align="left">44577894</td>
-<td align="left">44582287</td>
-<td align="left">-</td>
-<td align="left">transmembrane emp24 protein transport domain containing 4 [Source:HGNC Symbol;Acc:HGNC:22301]</td>
-<td align="left">TMED4</td>
 <td align="left">transmembrane p24 trafficking protein 4 [Source:HGNC Symbol;Acc:HGNC:22301]</td>
 <td align="left">ENSG00000158604</td>
 <td align="right">0.2314536</td>
@@ -1064,13 +782,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000227751</td>
-<td align="left">RP1-20B21.4</td>
-<td align="left">1</td>
-<td align="left">17406760</td>
-<td align="left">17407382</td>
-<td align="left">+</td>
-<td align="left">No description</td>
-<td align="left">RCC2-AS1</td>
 <td align="left">RCC2 antisense RNA 1 [Source:HGNC Symbol;Acc:HGNC:41262]</td>
 <td align="left">ENSG00000227751</td>
 <td align="right">-0.7620318</td>
@@ -1081,13 +792,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000245261</td>
-<td align="left">RP3-330M21.5</td>
-<td align="left">6</td>
-<td align="left">43213801</td>
-<td align="left">43223860</td>
-<td align="left">-</td>
-<td align="left">No description</td>
-<td align="left">RP3-330M21.5</td>
 <td align="left">novel transcript</td>
 <td align="left">ENSG00000245261</td>
 <td align="right">0.9459210</td>
@@ -1098,13 +802,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000100726</td>
-<td align="left">TELO2</td>
-<td align="left">16</td>
-<td align="left">1493344</td>
-<td align="left">1510457</td>
-<td align="left">+</td>
-<td align="left">telomere maintenance 2 [Source:HGNC Symbol;Acc:HGNC:29099]</td>
-<td align="left">TELO2</td>
 <td align="left">telomere maintenance 2 [Source:HGNC Symbol;Acc:HGNC:29099]</td>
 <td align="left">ENSG00000100726</td>
 <td align="right">-0.8293710</td>
@@ -1115,13 +812,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000279069</td>
-<td align="left">RP11-159D12.6</td>
-<td align="left">17</td>
-<td align="left">58006674</td>
-<td align="left">58008187</td>
-<td align="left">+</td>
-<td align="left">No description</td>
-<td align="left">RP11-159D12.6</td>
 <td align="left">novel transcript</td>
 <td align="left">ENSG00000279069</td>
 <td align="right">-0.6437619</td>
@@ -1132,13 +822,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000110651</td>
-<td align="left">CD81</td>
-<td align="left">11</td>
-<td align="left">2376177</td>
-<td align="left">2397419</td>
-<td align="left">+</td>
-<td align="left">CD81 molecule [Source:HGNC Symbol;Acc:HGNC:1701]</td>
-<td align="left">CD81</td>
 <td align="left">CD81 molecule [Source:HGNC Symbol;Acc:HGNC:1701]</td>
 <td align="left">ENSG00000110651</td>
 <td align="right">-0.3638583</td>
@@ -1149,13 +832,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000277595</td>
-<td align="left">RP11-946P6.6</td>
-<td align="left">12</td>
-<td align="left">110032245</td>
-<td align="left">110032803</td>
-<td align="left">+</td>
-<td align="left">No description</td>
-<td align="left">RP11-946P6.6</td>
 <td align="left">novel transcript, sense intronic to ANKRD13A</td>
 <td align="left">ENSG00000277595</td>
 <td align="right">0.7893252</td>
@@ -1166,13 +842,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000261332</td>
-<td align="left">RP11-297C4.1</td>
-<td align="left">16</td>
-<td align="left">30498766</td>
-<td align="left">30499554</td>
-<td align="left">-</td>
-<td align="left">No description</td>
-<td align="left">RP11-297C4.1</td>
 <td align="left">novel transcript, antisense to ITGAL</td>
 <td align="left">ENSG00000261332</td>
 <td align="right">-0.5043539</td>
@@ -1183,13 +852,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000266086</td>
-<td align="left">RP11-159D12.5</td>
-<td align="left">17</td>
-<td align="left">57989038</td>
-<td align="left">58005253</td>
-<td align="left">-</td>
-<td align="left">Uncharacterized protein {ECO:0000313|Ensembl:ENSP00000463235} [Source:UniProtKB/TrEMBL;Acc:J3QKU1]</td>
-<td align="left">RP11-159D12.5</td>
 <td align="left">novel transcript</td>
 <td align="left">ENSG00000266086</td>
 <td align="right">-0.3513690</td>
@@ -1200,13 +862,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000102409</td>
-<td align="left">BEX4</td>
-<td align="left">X</td>
-<td align="left">103215092</td>
-<td align="left">103217246</td>
-<td align="left">+</td>
-<td align="left">brain expressed, X-linked 4 [Source:HGNC Symbol;Acc:HGNC:25475]</td>
-<td align="left">BEX4</td>
 <td align="left">brain expressed X-linked 4 [Source:HGNC Symbol;Acc:HGNC:25475]</td>
 <td align="left">ENSG00000102409</td>
 <td align="right">0.5708887</td>
@@ -1217,13 +872,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="even">
 <td align="left">ENSG00000254662</td>
-<td align="left">RP11-872D17.4</td>
-<td align="left">11</td>
-<td align="left">57325603</td>
-<td align="left">57327958</td>
-<td align="left">+</td>
-<td align="left">No description</td>
-<td align="left">RP11-872D17.4</td>
 <td align="left">novel transcript</td>
 <td align="left">ENSG00000254662</td>
 <td align="right">-0.9034323</td>
@@ -1234,13 +882,6 @@ for(i in names(xgroup)){
 </tr>
 <tr class="odd">
 <td align="left">ENSG00000126091</td>
-<td align="left">ST3GAL3</td>
-<td align="left">1</td>
-<td align="left">43705824</td>
-<td align="left">43931165</td>
-<td align="left">+</td>
-<td align="left">ST3 beta-galactoside alpha-2,3- sialyltransferase 3 [Source:HGNC Symbol;Acc:HGNC:10866]</td>
-<td align="left">ST3GAL3</td>
 <td align="left">ST3 beta-galactoside alpha-2,3-sialyltransferase 3 [Source:HGNC Symbol;Acc:HGNC:10866]</td>
 <td align="left">ENSG00000126091</td>
 <td align="right">0.4575722</td>
