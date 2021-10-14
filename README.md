@@ -33,5 +33,7 @@ Code for systems analysis of KSPZV1 malaria vaccine trial.
 
 ## Other
 
+[Time-to-parasitemia through 6 months for select genes from Δ (post-vax/baseline) DGE analysis](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-TTE-Analysis-Genes-Induced-in-Protected.html)
+
 [ST3GAL3 heatmap from other datasets](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-ST3GAL3-heatmap-from-other-datasets.html)
 
