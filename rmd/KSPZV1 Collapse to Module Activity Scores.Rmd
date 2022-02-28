@@ -1,0 +1,359 @@
+---
+title: "PfSPZ Collapse Module Activity Scores from Leading Edges"
+author: "Tuan M. Tran"
+date: "2/11/2022"
+output: html_document
+---
+
+```{r setup, include=TRUE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(ggplot2)
+library(googledrive)
+library(EDASeq)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objective
+
+This document has code to take leading edges from DGE->GSEA analysis and collapses to module activity scores.
+
+## Load ExpressionSet
+
+```{r load cpm eset, echo = TRUE, message=FALSE, warning=FALSE}
+#local
+#x	<-	readRDS("/Volumes/GoogleDrive/My Drive/Tran Lab Shared/Projects/Doris Duke PfSPZ Kenya/Tuan PfSPZ/KenyaPfSPZ/Final Data Files/KSPZV1 logCPM expression sets for visualization/PfSPZ_cpm_ExpressionSet_244x21815_AllGroups_bothBatches_0_rmBatchFX_06082021_TMT_logTRUE.rds")
+#from google drive
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("1togaBlNIxiDj16FyXTC-r7Qw0A9cG2az"), path = temp, overwrite = TRUE)
+x <- readRDS(file = dl$local_path)
+x$treat <- factor(x$treat, levels = c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+```
+
+## Downselect based on leading edges
+
+Getting leading edges from baseline DGE analysis
+
+```{r get leading edges, echo = TRUE, message=FALSE, warning=FALSE}
+gsea_LE <- readxl::read_excel("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Table SX Prevax GSEA Tables for KSPZV1 revision.xlsx") %>%
+  dplyr::filter(module_type %in% c("highBTMs", "lowBTMs", "MonacoModules", "BloodGen3Module"))
+
+#Pull out flipped pathways with FDR <20% from Placebo and High-dose
+
+gsea_LE_filtered <- gsea_LE %>%
+  filter(treatment %in% c("Placebo", "1.8 x 10^6 PfSPZ")) %>% #only placebo and highdose
+  mutate(treatment = gsub("1\\.8 x 10\\^6 PfSPZ", "high_dose_PfSPZ", treatment)) %>% #rename highdose to syntactically valid name
+  filter(padj<0.20) #FDR cutoff
+gsea_LE_filtered2 <- gsea_LE_filtered %>%
+    filter(duplicated(pathway)|duplicated(pathway, fromLast=TRUE)) %>% #only pathways in common
+  arrange(pathway) %>%
+  dplyr::select(-c(ES, size, pval, padj, module_type, leadingEdge)) %>% #remove unwanted columns (will join back later)
+  pivot_wider(., names_from = treatment, values_from = NES) %>%
+  filter(sign(Placebo) != sign(high_dose_PfSPZ)) %>% #filter only "'flipped" normalized enrichment scores
+  pivot_longer(cols = 2:3, names_to = "treatment", values_to = "NES") %>%
+  dplyr::select(-c(NES)) %>%
+  left_join(., gsea_LE_filtered, by = c("pathway", "treatment"))  #join with original gsea_LE dataframe
+
+#Find intersect and outersect for each module
+
+gsea_LE_filtered3 <- gsea_LE_filtered2 %>%
+  dplyr::select(-c(ES, size, pval, padj, module_type, NES)) %>% #remove unwanted columns (will join back later)%>%
+  pivot_wider(names_from = treatment, values_from = leadingEdge) %>%
+  column_to_rownames(var = "pathway") %>%
+  data.frame()
+
+#loop to determine intersect between leading edges
+myunions <- sapply(rownames(gsea_LE_filtered3),function(x) NULL)
+for(i in 1:nrow(gsea_LE_filtered3)){
+  myunions[[i]] <- union(unlist(str_split(gsea_LE_filtered3[i,]$Placebo, ", ")), unlist(str_split(gsea_LE_filtered3[i,]$high_dose_PfSPZ, ", ")))
+}
+# number of elements in union of placebo and highdose (baseline P vs NP GSEA) by module
+# lapply(myunions, length)
+
+myintersects <- sapply(rownames(gsea_LE_filtered3),function(x) NULL)
+for(i in 1:nrow(gsea_LE_filtered3)){
+  myintersects[[i]] <- intersect(unlist(str_split(gsea_LE_filtered3[i,]$Placebo, ", ")), unlist(str_split(gsea_LE_filtered3[i,]$high_dose_PfSPZ, ", ")))
+}
+# number of elements in intersect of placebo and highdose (baseline P vs NP GSEA) by module
+# lapply(myintersects, length)
+
+placebo_not_highdose <- sapply(rownames(gsea_LE_filtered3),function(x) NULL)
+for(i in 1:nrow(gsea_LE_filtered3)){
+  placebo_not_highdose[[i]] <- setdiff(unlist(str_split(gsea_LE_filtered3[i,]$Placebo, ", ")), unlist(str_split(gsea_LE_filtered3[i,]$high_dose_PfSPZ, ", ")))
+}
+# number of elements in placeb0 not in highdose by module
+# lapply(placebo_not_highdose, length)
+
+highdose_not_placebo <- sapply(rownames(gsea_LE_filtered3),function(x) NULL)
+for(i in 1:nrow(gsea_LE_filtered3)){
+  highdose_not_placebo[[i]] <- setdiff(unlist(str_split(gsea_LE_filtered3[i,]$high_dose_PfSPZ, ", ")), unlist(str_split(gsea_LE_filtered3[i,]$Placebo, ", ")))
+}
+# number of elements in high_dose not in placebo by module
+# lapply(highdose_not_placebo, length)
+
+flipped_numbers <- data.frame("union" = unlist(lapply(myunions, length)),
+                              "intersect" = unlist(lapply(myintersects, length)),
+                              "placebo_only" = unlist(lapply(placebo_not_highdose, length)),
+                              "high_dose_only" = unlist(lapply(highdose_not_placebo, length)))
+flipped_numbers$percent_intersect <- signif(flipped_numbers$intersect/flipped_numbers$union, 2)
+
+#sanity check
+ifelse(
+  all(flipped_numbers[,1] == flipped_numbers[,2] + flipped_numbers[,3] + flipped_numbers[,4]) ,
+  "all is good.",
+  "please re-check intersects"
+  )
+
+#view dataframe as table
+knitr::kable(flipped_numbers)
+```
+
+### Inspect intersecting and non-mutual genes between Placebo P vs NP and high-dose SPZ P vs NP
+
+
+```{r inspect genes, echo = TRUE}
+
+myintersects$MONOCYTES
+
+placebo_not_higdose$MONOCYTES
+
+highdose_not_placebo$MONOCYTES
+
+myintersects$`INFLAMMATORY/TLR/CHEMOKINES`
+
+placebo_not_highdose$`INFLAMMATORY/TLR/CHEMOKINES`
+
+highdose_not_placebo$`INFLAMMATORY/TLR/CHEMOKINES`
+
+myintersects$`enriched in myeloid cells and monocytes (M81)`
+
+placebo_not_highdose$`enriched in myeloid cells and monocytes (M81)`
+
+highdose_not_placebo$`enriched in myeloid cells and monocytes (M81)`
+```
+```{r look at monocyte intersect and setdiffs, echo = FALSE}
+Placebo_DEGs <- readxl::read_excel("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Table S1 Prevax DEG Tables for KSPZV1 VRC312 VR314 revision.xlsx") %>%
+  filter(study == "KSPZV1" & treatment == "Placebo") %>%
+  dplyr::select(hgnc_symbol, ensembl_id, logFC, PValue, FDR) %>%
+  filter(hgnc_symbol %in% gsub("\\\r\\\n", "", placebo_not_highdose$MONOCYTES))
+
+write_csv(Placebo_DEGs, "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Table SX Placebo NOT High Dose MONOCYTES Leading Edges for IPA.csv")
+
+Highdose_DEGs <- readxl::read_excel("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Table S1 Prevax DEG Tables for KSPZV1 VRC312 VR314 revision.xlsx") %>%
+  filter(study == "KSPZV1" & treatment == "1.8 x 10^6 PfSPZ") %>%
+  dplyr::select(hgnc_symbol, ensembl_id, logFC, PValue, FDR) %>%
+  filter(hgnc_symbol %in% gsub("\\\r\\\n", "", highdose_not_placebo$MONOCYTES))
+
+write_csv(Highdose_DEGs, "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Table SX High Dose NOT Placebo MONOCYTES Leading Edges for IPA.csv")
+
+Intersect_DEGs <- readxl::read_excel("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Table S1 Prevax DEG Tables for KSPZV1 VRC312 VR314 revision.xlsx") %>%
+  filter(study == "KSPZV1" & treatment == "Placebo" |
+         study == "KSPZV1" & treatment == "1.8 x 10^6 PfSPZ") %>%
+  dplyr::select(treatment, hgnc_symbol, ensembl_id, logFC, PValue, FDR) %>%
+  filter(hgnc_symbol %in% gsub("\\\r\\\n", "", myintersects$MONOCYTES)) %>%
+  arrange(ensembl_id) %>%
+  group_by(ensembl_id) %>%
+  summarise(mean_logFC = mean(logFC), mean_PValue = mean(PValue), mean_FDR = mean(FDR)) %>%
+  arrange(mean_PValue)
+
+write_csv(Intersect_DEGs, "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Table SX Intersect Placebo High Dose MONOCYTES Leading Edges for IPA.csv")
+```
+
+
+```{r look at sCD163, echo=FALSE}
+cd163 <- readRDS("/Volumes/GoogleDrive/My Drive/Tran Lab Shared/Projects/Doris Duke PfSPZ Kenya/Tuan PfSPZ/KenyaPfSPZ/Final Data Files/Jyoti Data CD163 and EndoCab/PfSPZ_scd163_127Samples_dataframe_07062021.rds")
+
+cd163 %>%
+  ggplot(., aes(x= Dosegroup, y = MeanResult, fill = Outcome)) +
+  geom_boxplot() +
+  theme_bw()
+```
+```{r make plot of intersect and outersects, echo = TRUE, message=FALSE, warnings = FALSE, fig.width=10, fig.height=12}
+#make long format for plotting and re-level and order for aesthetics
+flipped_numbers_for_plot <- flipped_numbers %>%
+  dplyr::select(-c(union)) %>%
+  rownames_to_column(var = "pathway") %>%
+  as_tibble() %>%
+  left_join(., gsea_LE_filtered2 %>%   #join with original GSEA table to get module_types (necessary for faceting)
+              dplyr::select(pathway, module_type),
+            by= "pathway") %>%
+  pivot_longer(cols = intersect:high_dose_only, names_to = "group", values_to = "number_of_genes") %>%
+  mutate(group = factor(group, levels = c("placebo_only", "high_dose_only", "intersect"))) %>%
+  mutate(module_type = factor(module_type, levels = c("highBTMs", "lowBTMs", "MonacoModules", "BloodGen3Module"))) %>%
+  mutate(pathway = fct_reorder(pathway, number_of_genes, .desc=TRUE)) #reorder pathway by number of genes, with order as descending
+
+flipped_numbers_for_plot %>%
+  ggplot(., aes(x = pathway, y = number_of_genes, fill = group)) +
+  geom_bar(stat = "identity") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_fill_manual(values=c("#6f6f6e","#d83327", "#4657a6")) +
+  facet_wrap(~module_type, scales = "free") #for placebo and highdose, used hex codes from original Figure 1A
+  
+```
+
+### Explanation
+
+We now want to downselect only genes that were leading edges in any of the high BTMs that were flipped. These leading edges are useful because they're the genes that drive the differences. Note that we can also do something similar to low BTMS, MonacoModules, and BloodGen3Modules, but will use high BTMs as the use case.
+
+## Limit to leading edges than collapse to activity scores
+
+```{r collapse, echo=FALSE}
+gsea_LE_filtered4 <- gsea_LE_filtered3 %>%
+  rownames_to_column(var = "pathway") %>%
+  left_join(., gsea_LE_filtered2 %>%   #join with original GSEA table to get module_types
+              dplyr::select(pathway, module_type) %>%
+              distinct(pathway, module_type),
+            by= "pathway") %>%
+  filter(module_type == "highBTMs") %>%
+  column_to_rownames(var = "pathway") %>%
+  dplyr::select(-c(module_type))
+  
+myLeadingEdges <- sapply(rownames(gsea_LE_filtered4),function(x) NULL)
+for(i in 1:nrow(gsea_LE_filtered4)){
+  myLeadingEdges[[i]] <- c(unlist(str_split(gsea_LE_filtered4[i,]$Placebo, ", ")), unlist(str_split(gsea_LE_filtered4[i,]$high_dose_PfSPZ, ", ")))
+}
+
+x_leadingedges_only <- x[fData(x)$GeneSymbol %in% unique(unlist(myLeadingEdges)),]
+
+devtools::source_url("https://github.com/TranLab/ModuleLists/blob/main/Gene2ModuleExpressionScores.R?raw=TRUE")
+x_LE_mes <- Gene2ModuleExpressionScores(x_leadingedges_only, module_list = "highBTMs", summary_stat = median)
+
+#merge expression data with pData
+
+x_LE_mes_merged <- x_LE_mes %>%
+  t() %>%
+  data.frame %>%
+  rownames_to_column(var = "PATID") %>%
+  mutate(PATID = gsub("_0", "", PATID)) %>%
+  left_join(., pData(x) %>%
+              dplyr::select(PATID, site, SEX, treat, mal.atp.3, tte.mal.atp.6, pfcsp_pre),
+            by = "PATID") %>%
+  mutate(group = factor(ifelse(treat == "Placebo" & mal.atp.3 == 0, "placebo_P",
+                        ifelse(treat == "Placebo" & mal.atp.3 == 1, "placebo_NP",
+                               ifelse(treat == "1.8 x 10^6 PfSPZ" & mal.atp.3 == 0, "high_dose_PfSPZ_P",
+                                      ifelse(treat == "1.8 x 10^6 PfSPZ" & mal.atp.3 == 1, "high_dose_PfSPZ_NP",
+                                      "ND")))),
+                        levels = c("placebo_P",
+                                   "placebo_NP",
+                                   "high_dose_PfSPZ_P",
+                                   "high_dose_PfSPZ_NP",
+                                   "ND"))) %>%
+  filter(group != "ND") %>%
+  droplevels() %>%
+  pivot_longer(cols = INFLAMMATORY.TLR.CHEMOKINES:NK.CELLS, values_to = "MES", names_to = "Module")
+```
+
+### Plot MES vs Time to first infection (6 months) for every module ALL groups
+
+```{r plot MES vs TTE ALL groups, echo = TRUE, fig.width=12, fig.height=12}
+library(ggpubr)
+x_LE_mes_merged %>%
+  ggplot(., aes(x=tte.mal.atp.6, y=MES)) +
+  geom_point() +
+  stat_cor(method="spearman",
+           label.x.npc = "left",
+           label.y.npc = "bottom",) +
+  facet_wrap(~Module)
+```
+
+
+### Plot MES vs Time to first infection (6 months) for every module by group
+
+```{r plot MES vs TTE by group, echo = TRUE, fig.width=12, fig.height=12}
+library(ggpubr)
+x_LE_mes_merged %>%
+  ggplot(., aes(x=tte.mal.atp.6, y=MES, color = group)) +
+  geom_point() +
+  stat_cor(method="spearman",
+           label.x.npc = "left",
+           label.y.npc = "bottom",) +
+  facet_wrap(~Module)
+```
+
+### Plot MES vs CSP Ab baseline for every module for a ll
+
+```{r plot MES vs CSP Pre for all, echo = TRUE, fig.width=12, fig.height=12}
+library(ggpubr)
+x_LE_mes_merged %>%
+  ggplot(., aes(x=log10(pfcsp_pre+10), y=MES)) +
+  geom_point() +
+  stat_cor(method="spearman",
+           label.x.npc = "left",
+           label.y.npc = "bottom",) +
+  facet_wrap(~Module)
+```
+
+### Plot MES vs CSP Ab baseline for every module by group
+
+```{r plot MES vs CSP Pre by group, echo = TRUE, fig.width=12, fig.height=12}
+library(ggpubr)
+x_LE_mes_merged %>%
+  ggplot(., aes(x=log10(pfcsp_pre+10), y=MES, color = group)) +
+  geom_point() +
+  stat_cor(method="spearman",
+           label.x.npc = "left",
+           label.y.npc = "bottom",) +
+  facet_wrap(~Module)
+```
+
+```{r joining Jyoti and Aditi data, echo = FALSE}
+Monocyte_ICS <- read_rds("/Volumes/GoogleDrive/My Drive/Tran Lab Shared/Projects/Doris Duke PfSPZ Kenya/PfSPZ Aditi/PfSPZ_Jyoti_ICSexperiment_Analysis/PfSPZ_ICSexperiment_122Samples_dataframe.Rds") %>%
+  mutate(`CD14+ freq` = gsub(" \\%", "", `CD14+ freq`)) %>%
+  mutate(across(`Viability (%)`:`HLA-DR Median`, as.numeric)) %>%
+  dplyr::select(-c(Class, `Viability (%)`))
+
+x_LE_mes_monocICS_merged <- x_LE_mes_merged %>%
+  left_join(., Monocyte_ICS, by = "PATID") %>%
+  pivot_longer(., cols = `CD14+ freq`:`HLA-DR Median`, names_to = "FACS_ICS_parameter", values_to = "value")
+```
+
+### Plot every MES with Every ICS ALL groups
+
+```{r plot every MES with Every ICS ALL groups , echo = FALSE, fig.width=12, fig.height=12}
+myPlot <- x_LE_mes_monocICS_merged %>%
+  ggplot(., aes(x=value, y=MES)) +
+  geom_point() +
+  stat_cor(method="spearman",
+           label.x.npc = "left",
+           label.y.npc = "bottom",) +
+  facet_wrap(~Module+FACS_ICS_parameter, scales = "free")
+
+cairo_pdf("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/plot every MES with Every ICS ALL groups.pdf", width = 40, height = 40, onefile = TRUE)
+myPlot
+dev.off()
+```
+
+### Plot every MES with Every ICS by group
+
+```{r plot every MES with Every ICS by group , echo = FALSE, fig.width=12, fig.height=12}
+myPlot <- x_LE_mes_monocICS_merged %>%
+  ggplot(., aes(x=value, y=MES, color = group)) +
+  geom_point() +
+  stat_cor(method="spearman",
+           label.x.npc = "left",
+           label.y.npc = "bottom",) +
+  facet_wrap(~Module+FACS_ICS_parameter, scales = "free")
+
+cairo_pdf("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/plot every MES with Every ICS by groups.pdf", width = 40, height = 40, onefile = TRUE)
+myPlot
+dev.off()
+```
+
+
+### Plot MES by Group
+
+```{r plot MES by grou, echo = FALSE, fig.width=12, fig.height=12}
+# x_LE_mes_monocICS_merged %>% rstatix::pairwise_wilcox_test(Sepal.Length ~ Species)
+# 
+# x_LE_mes_monocICS_merged %>%
+#   ggplot(., aes(x=group, y = MES)) +
+#   geom_boxplot() +
+#   theme_bw() +
+#   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+#   facet_wrap(~Module)
+
+```
+
+
