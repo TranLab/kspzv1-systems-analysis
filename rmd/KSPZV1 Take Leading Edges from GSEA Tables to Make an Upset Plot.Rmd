@@ -1,0 +1,156 @@
+---
+title: "PfSPZ Take Leading Edges from a GSEA Table to Make an Upset Plot"
+author: "Tuan M. Tran"
+date: "2/23/2022"
+output: html_document
+---
+
+```{r setup, include=TRUE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(ggplot2)
+library(googledrive)
+library(EDASeq)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objective
+
+This markdown shows how to convert data to format required for UpSet Plot (See: https://cran.r-project.org/web/packages/UpSetR/vignettes/basic.usage.html)
+
+Per usage in vignette, UpSet requires a dataframe by which the first column if the feature and subsequent columns include "sets" with inclusion of each feature within a set as either 1 (included) or 0 (not included). See ?UpSetR::upset
+
+Since our goal is to have features (leading edges) as rows and genesets as columns, one approach to solve this is to convert leading edge vectors for each pathway/module into two-column dataframes with the first column being the leading edge and the second column coded as "1" and the pathway/module as the column name. Then, a FULL join of all two-column dataframes can be performed while converting NAs into "0".
+
+Here it is complicated by the fact that we have different comparisons for each treatment group. Thus, each pathway/module will have to be replicated for each treatment. Since we are only concerned with Placebo and high-dose PfSPZ in our case, we will have two per pathway. Also, we only care about flipped pathways that are significant (FDR<20%). 
+
+## Downselect based on leading edges
+
+Getting leading edges from baseline DGE analysis, then filter pathway/modules that are signficant and relevant.
+
+```{r get leading edges, echo = TRUE, message=FALSE, warning=FALSE}
+gsea_LE <- readxl::read_excel("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Table SX Prevax GSEA Tables for KSPZV1 revision.xlsx") %>%
+  dplyr::filter(module_type %in% c("highBTMs", "lowBTMs", "MonacoModules", "BloodGen3Module"))
+
+#Pull out flipped pathways with FDR <20% from Placebo and High-dose
+gsea_LE_filtered <- gsea_LE %>%
+  filter(treatment %in% c("Placebo", "1.8 x 10^6 PfSPZ")) %>% #only placebo and highdose
+  mutate(treatment = gsub("1\\.8 x 10\\^6 PfSPZ", "high_dose_PfSPZ", treatment)) %>% #rename highdose to syntactically valid name
+  filter(padj<0.20) #FDR cutoff
+gsea_LE_filtered2 <- gsea_LE_filtered %>%
+    filter(duplicated(pathway)|duplicated(pathway, fromLast=TRUE)) %>% #only pathways in common
+  arrange(pathway) %>%
+  dplyr::select(-c(ES, size, pval, padj, module_type, leadingEdge)) %>% #remove unwanted columns (will join back later)
+  pivot_wider(., names_from = treatment, values_from = NES) %>%
+  filter(sign(Placebo) != sign(high_dose_PfSPZ)) %>% #filter only "'flipped" normalized enrichment scores
+  pivot_longer(cols = 2:3, names_to = "treatment", values_to = "NES") %>%
+  dplyr::select(-c(NES)) %>%
+  left_join(., gsea_LE_filtered, by = c("pathway", "treatment"))  #join with original gsea_LE dataframe
+```
+
+
+```{r wrangle to UpSet format, echo = TRUE}
+#paste pathway and treatment to create a new variable.  This will eventually become the column names
+gsea_LE_filtered3 <- gsea_LE_filtered2 %>%
+  mutate(pathway_treat = paste(pathway, treatment, sep = " ")) %>%
+  dplyr::select(pathway_treat, module_type, leadingEdge) %>%
+  filter(module_type == "highBTMs") %>% #filter here if to limit to specific modules
+  column_to_rownames(var = "pathway_treat") %>%
+  data.frame()
+
+#loop to convert into list of dataframes with features as rows and second column name as pathway/module
+myList <- sapply(rownames(gsea_LE_filtered3),function(x) NULL)
+for(i in 1:nrow(gsea_LE_filtered3)){
+  myList[[i]] <- data.frame("LeadingEdge" = unlist(str_split(gsea_LE_filtered3[i,]$leadingEdge,  ", ")), "TempName" = 1)
+  names(myList[[i]])[names(myList[[i]]) == 'TempName'] <- names(myList[i])
+}
+
+#use join_all to join all dataframes in list, with type set to "full"
+upset.df <- plyr::join_all(myList, by = "LeadingEdge", type = "full")
+
+#clean up column names
+colnames(upset.df) <- gsub("high_dose_PfSPZ", "1.8x10^6 PfSPZ", colnames(upset.df))
+
+#convert NAs to zeros
+upset.df[is.na(upset.df)] <- 0
+
+#add addition parameters
+upset.df <- upset.df %>%
+  mutate(overlap = as.factor(ifelse(.$`DC ACTIVATION Placebo` == 1 & .$`DC ACTIVATION 1.8x10^6 PfSPZ`== 1 |
+                                       .$`ECM AND MIGRATION Placebo` == 1 & .$`ECM AND MIGRATION 1.8x10^6 PfSPZ`== 1 |
+                                       .$`INFLAMMATORY/TLR/CHEMOKINES Placebo` == 1 & .$`INFLAMMATORY/TLR/CHEMOKINES 1.8x10^6 PfSPZ`== 1 |
+                                       .$`Mitochondrial Placebo` == 1 & .$`Mitochondrial 1.8x10^6 PfSPZ` == 1|
+                                       .$`MONOCYTES Placebo` == 1 & .$`MONOCYTES 1.8x10^6 PfSPZ`== 1, "YES", "NO")))
+```
+
+```{r make upset plot, echo = TRUE, fig.width=12, fig.height=8}
+library(UpSetR)
+
+upset.df %>%
+  UpSetR::upset(. , nsets = 10, number.angles = 30, show.numbers = "no", point.size = 3, line.size = 1,
+    mainbar.y.label = "intersection size", sets.x.label = "leading edges per module/pathway",
+    queries = list(
+      list(
+        query = intersects,
+        params = list("MONOCYTES Placebo", "MONOCYTES 1.8x10^6 PfSPZ"),
+        color = "#Df5286",
+        active = T,
+        query.name = "Intersection between Placebo and 1.8x10^6 PfSPZ"
+        ),
+      list(
+        query = intersects,
+        params = list("INFLAMMATORY/TLR/CHEMOKINES Placebo", "INFLAMMATORY/TLR/CHEMOKINES 1.8x10^6 PfSPZ"),
+        color = "#Df5286",
+        active = T,
+        query.name = "Intersection between Placebo and 1.8x10^6 PfSPZ"
+        ),
+      list(
+        query = intersects,
+        params = list("DC ACTIVATION Placebo", "DC ACTIVATION 1.8x10^6 PfSPZ"),
+        color = "#Df5286",
+        active = T,
+        query.name = "Intersection between Placebo and 1.8x10^6 PfSPZ"
+        ),
+      list(
+        query = intersects,
+        params = list("ECM AND MIGRATION Placebo", "ECM AND MIGRATION 1.8x10^6 PfSPZ"),
+        color = "#Df5286",
+        active = T,
+        query.name = "Intersection between Placebo and 1.8x10^6 PfSPZ"
+        ),
+      list(
+        query = intersects,
+        params = list("Mitochondrial Placebo", "Mitochondrial 1.8x10^6 PfSPZ"),
+        color = "#Df5286",
+        active = T,
+        query.name = "Intersection between Placebo and 1.8x10^6 PfSPZ"
+        )
+      ),
+    text.scale = c(1.3, 1.3, 1, 1, 2, 0.75),
+    mb.ratio = c(0.35,0.65))
+```
+
+### Switch to Complex Upset package
+
+https://krassowski.github.io/complex-upset/articles/Examples_R.html
+
+```{r complex upset, echo = TRUE, fig.width=10, fig.height=7}
+library(ComplexUpset)
+library(ggplot2)
+leadingEgdes <- upset.df
+leadingEgdes <- leadingEgdes %>%
+  mutate(overlap = ifelse(overlap=="YES", 1,0))
+modules <- colnames(leadingEgdes)[2:11]
+leadingEgdes[modules] <- leadingEgdes[modules] == 1
+t(head(leadingEgdes[modules], 3))
+leadingEgdes = na.omit(leadingEgdes)
+
+ComplexUpset::upset(leadingEgdes, modules, name='modules', width_ratio=0.1, wrap=TRUE,
+      queries=list(
+        upset_query(intersect=c("MONOCYTES Placebo", "MONOCYTES 1.8x10^6 PfSPZ"), color='#Df5286'),
+        upset_query(intersect=c("DC ACTIVATION Placebo", "DC ACTIVATION 1.8x10^6 PfSPZ"), color='#Df5286'))
+)
+
+
+
+```
