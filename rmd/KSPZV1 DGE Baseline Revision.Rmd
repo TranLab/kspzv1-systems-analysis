@@ -317,3 +317,22 @@ print(BottomPlot)
 # ggsave("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Fig S3ABC revised lowBTM HALLMARK BloodGen3 GSEA Bubble Plot.pdf", FigS3_plot, device = "pdf", units = "in", height = 8, width = 14)
 ```
 
+```{r save for IPA, echo = FALSE}
+tabdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/"
+
+temp <- degtab
+for(i in names(degtab)){
+  temp[[i]] <- degtab[[i]] %>%
+    dplyr::select(Geneid, EnsemblID, logFC, PValue, FDR)
+  }
+
+temp$Placebo %>%
+   write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev placebo IPA.csv"))
+temp$`4.5 x 10^5 PfSPZ` %>%
+   write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev lowdose IPA.csv"))
+temp$`9.0 x 10^5 PfSPZ` %>%
+   write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev meddose IPA.csv"))
+temp$`1.8 x 10^6 PfSPZ` %>%
+   write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev highdose IPA.csv"))
+```
+

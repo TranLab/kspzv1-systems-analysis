@@ -1,0 +1,138 @@
+---
+title: "KSPZV1 DGE Baseline Revision IPA Plots"
+author: "Tuan M. Tran"
+date: "4/28/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(googledrive)
+knitr::opts_chunk$set(echo = TRUE)
+datadir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Baseline IPA UpReg Tables Revised/"
+figdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/"
+```
+
+## Objective
+
+Makes volcano plots from IPA tables
+
+```{r readin data, eval=FALSE, message=FALSE, warning=FALSE}
+myFiles <- list.files(path = datadir, pattern='*263 pval25.xls')
+df.list <- lapply(paste0(datadir, myFiles), read_excel, skip = 1)
+names(df.list) <- gsub(" UpReg LFC 263 pval25.xls", "", myFiles)
+
+UpRegPvS <- bind_rows(df.list, .id = "Comparison")
+UpRegPvS %>%
+  mutate(Treatment = factor(Comparison, levels = c("Baseline Placebo", "Baseline Lowdose", "Baseline Meddose", "Baseline Highdose"),
+                                labels = c("Placebo", "4.5x105", "9.0x105", "1.8x106"))) %>%
+  mutate(Timepoint = "Baseline") %>%
+  mutate(Comparison = "Protected vs Not Protected") %>%
+  # filter(`B-H corrected p-value` < 0.2) %>%
+  # filter(`Activation z-score` >= 2 | `Activation z-score` <= -2) %>%
+  select(Timepoint, Treatment, Comparison, everything()) %>%
+  writexl::write_xlsx(., paste0(datadir, "IPA Upstrem Regulator Baseline Protected vs NonProtected All Treatment.xlsx"))
+```
+
+### Load data
+
+```{r read in data googleddrive, eval=TRUE, message=FALSE}
+temp <- tempfile(fileext = ".xlsx")
+dl <- drive_download(
+  as_id("1Dl4Fv-mXxdRxMzPmyUeSkM5vDldR0bf2"), path = temp, overwrite = TRUE)
+UpRegPvS <- readxl::read_excel(path = dl$local_path)
+```
+
+### Filter, clean, prepare data, and plot
+
+Baseline Upstream Regulator Volcano Plot Fig 2E Revised
+
+```{r upreg Baseline Keep MalVax1, echo=TRUE, fig.height=16, fig.width=16, warning=FALSE, message=FALSE}
+significance.cutoff <- 0.2
+zscore.cutoff <- 2
+MoleculeTypes <- c("cytokine", "transcription regulator", "G-protein coupled receptor", "chemical - endogenous non-mammalian", "chemical - endogenous mammalian",
+                  "group", "chemical toxicant", "microRNA", "enzyme", "translation regulator")
+# MoleculeTypes <- c("cytokine", "transcription regulator", "G-protein coupled receptor", "chemical - endogenous non-mammalian", "chemical drug", "chemical - endogenous mammalian",
+#                   "complex", "group", "chemical toxicant", "microRNA", "enzyme", "translation regulator")
+# UpRegPvS_foo <- UpRegPvS %>%
+#   filter(`p-value of overlap`<0.05) %>%
+#   filter(Comparison == "Baseline Placebo")
+UpRegPvS_foo <- UpRegPvS %>%
+  mutate(`Dose group` = factor(Treatment, levels = c("Placebo", "4.5x105", "9.0x105", "1.8x106"))) %>%
+  dplyr::select("Dose group", "Upstream Regulator", "Molecule Type", "Activation z-score", "p-value of overlap", "B-H corrected p-value", "Comparison") %>%
+  dplyr::rename(MoleculeType = "Molecule Type") %>%
+  mutate(`-log10(p-value of overlap)` = -log10(`p-value of overlap`)) %>%
+  mutate(`-log10(B-H adj. p value)` = -log10(`B-H corrected p-value`)) %>%
+  mutate(`Upstream Regulator` = gsub("\\(and other miRNAs.*", "", `Upstream Regulator`)) %>%
+  mutate(significant = ifelse(`B-H corrected p-value` < significance.cutoff & `Activation z-score` >= 2.2 |
+                                `B-H corrected p-value`< significance.cutoff & `Activation z-score` <= - 2, TRUE, FALSE)) %>%
+  filter(`B-H corrected p-value`< significance.cutoff) %>%
+  mutate(color = ifelse(significant == TRUE & `Activation z-score`>0, "red", "grey50")) %>%
+  mutate(color = ifelse(significant == TRUE & `Activation z-score` < 0, "blue", color)) %>%
+  mutate(label = ifelse(significant == TRUE, `Upstream Regulator`, "")) %>%
+  filter(MoleculeType %in% MoleculeTypes) %>%
+  mutate(label = gsub("Salmonella enterica serotype abortus equi lipopolysaccharide", "Salmonella LPS", label)) %>%
+  mutate(label = gsub("salmonella minnesota R595 lipopolysaccharides", "Salmonella LPS", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("tetradecanoylphorbol acetate", "PMA", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("sphingosine-1-phosphate", "S1P", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("beta-estradiol", "β-estradiol", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("Interferon alpha", "IFNα", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("IL1", "IL1β", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("IFN Beta", "IFNβ", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("Ifnar", "IFNAR", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("Tgf beta", "TGFβ", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("G protein alphai", "Giα protein", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("Nfat \\(family\\)", "NFAT", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("Alpha ", "α-", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("LPSs", "LPS", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("lipopolysaccharide", "LPS", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("medroxyprogesterone acetate", "MPA", label))
+#identify upstream regulators that appear as significant in more than one comparison
+foo <- UpRegPvS_foo %>%
+  group_by(label) %>%
+  summarize(n = n()) %>%
+  dplyr::filter(n > 1) %>%
+  dplyr::filter(label != "")
+#https://datavizpyr.com/how-to-add-labels-to-select-points-with-ggrepel/
+UpRegPvS_label_df <-  UpRegPvS_foo %>%
+  dplyr::filter(label %in% foo$label | #limit labels due to space limitations
+                  (`Activation z-score` < -2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "Placebo")|
+                  (`Activation z-score` > 2.2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "Placebo")|
+                  (`Activation z-score` < -2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "4.5x105")|
+                  (`Activation z-score` > 2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "4.5x105")|
+                  (`Activation z-score` < -2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "4.5x105")|
+                  (`Activation z-score` > 2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "9.0x105")|
+                  (`Activation z-score` < -2.2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "9.0x105")|
+                  (`Activation z-score` > 2.5 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "1.8x106")|
+                  (`Activation z-score` < -3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "1.8x106")|
+                  grepl("lipopolysaccharide", .$`Upstream Regulator`) |
+                  grepl("IL1", .$`Upstream Regulator`)) #limit label to upstream regulators that appear as significant in more than one comparison  
+
+myUpRegPlot <- UpRegPvS_foo %>%
+  ggplot(., aes(x = `Activation z-score`, y = `-log10(B-H adj. p value)`, label = label)) + 
+  geom_point(color = as.character(UpRegPvS_foo$color), alpha = 0.6) +
+  geom_hline(yintercept = -log10(significance.cutoff), color = "blue", linetype = "dotted") +
+  geom_vline(xintercept = c((-1*zscore.cutoff), zscore.cutoff), color = "red", linetype = "dotted") +
+  ggrepel::geom_label_repel(data = UpRegPvS_label_df, force = 18, force_pull = 1, size = 3.5, max.overlaps = 20,
+                            label.size = NA,
+                            label.padding = 0.01,
+                            box.padding = 0.01,
+                            fill = alpha(c("white"),0.7)) +
+  theme_bw() +
+  xlim(-6.1,6.1)+
+  facet_wrap(~`Dose group`, nrow = 2, ncol = 2) +
+  theme(axis.text=element_text(size=14),
+        axis.title=element_text(size=16),
+        strip.text = element_text(size=16),
+        strip.background = element_blank())
+
+myUpRegPlot
+```
+
+```{r print to pdf, eval=FALSE, echo=FALSE}
+cairo_pdf(paste0(figdir, "Fig 2E IPA UpReg 4 doses 1x4 revised.pdf"), height = 6.25, width = 24.25)
+myUpRegPlot
+dev.off()
+```
