@@ -16,7 +16,7 @@ Code for systems analysis of KSPZV1 malaria vaccine trial.
 
 [Complex heatmap and downstream clustering analyses, pre-immunization baseline](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Complex-Heatmaps-Baseline.html)
 
-[Complex heatmap and downstream clustering analyses, Δ (post-vax/baseline)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Complex-Heatmaps-Delta.html)
+[Complex heatmap and downstream clustering analyses, Δ (post-vax/baseline) (REVISED)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Complex-Heatmaps-Delta-Revision.html)
 
 ## Weighted gene correlation network analyses
 
