@@ -206,41 +206,6 @@ fviz_nbclust(t(exprs(x)), cluster::pam, method = "wss") +
   labs(subtitle = "Elbow method")
 ```
 
-```{r optimal clusters Silhouette, echo=FALSE, message=FALSE, warning=FALSE}
-# Silhouette method
-# fviz_nbclust(t(exprs(x)), cluster::pam, method = "silhouette")+
-#   labs(subtitle = "Silhouette method")
-```
-
-```{r optimal clusters Gap statistic, echo=FALSE, message=FALSE, warning=FALSE}
-# Gap statistic
-# nboot = 50 to keep the function speedy. 
-# recommended value: nboot= 500 for your analysis.
-# Use verbose = FALSE to hide computing progression.
-#set.seed(123)
-# fviz_nbclust(t(exprs(x)), cluster::pam, nstart = 25,  method = "gap_stat", nboot = 100)+
-#   labs(subtitle = "Gap statistic method")
-
-# myclusGapres <- cluster::clusGap(t(exprs(x)), cluster::pam, method = "firstSEmax", K.max = 8, B = 60)
-# title <- "Raw data"
-# par(mfrow=c(1,2))
-# xy <- t(exprs(x))
-# for (i in 1:2) {
-#   k <- maxSE(myclusGapres$Tab[, "gap"], myclusGapres$Tab[, "SE.sim"], method="Tibs2001SEmax")
-#   fit <- kmeans(xy, k)
-#   #
-#   # Plot the results.
-#   #
-#   pch <- ifelse(fit$cluster==1,24,16); col <- ifelse(fit$cluster==1,"Red", "Black")
-#   plot(xy, asp=1, main=title, pch=pch, col=col)
-#   plot(myclusGapres, main=paste("Gap stats,", title))
-#   abline(v=k, lty=3, lwd=2, col="Blue")
-#   xy <- apply(xy, 2, scale)
-#   title <- "Standardized data"
-# }
-```
-
-
 ## Clustering and Distance options
 
 Note: This chunk takes a while if you run the full gene set.
@@ -602,7 +567,7 @@ Pf.any.vax <- pData.cluster %>%
   geom_text(data = dat_text,mapping = aes(x = x, y = y, label = label, size = basefontsize))
   
   
-      foo1 <- c(1,2,3,4)  
+    foo1 <- c(1,2,3,4)  
     names(foo1) <-  names(summary(pData.cluster$treat))
     pData.cluster <- pData.cluster %>%
     mutate(Site = factor(site))

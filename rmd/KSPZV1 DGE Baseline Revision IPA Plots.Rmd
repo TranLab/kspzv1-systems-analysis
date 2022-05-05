@@ -22,7 +22,7 @@ Makes volcano plots from IPA tables
 ```{r readin data, eval=FALSE, message=FALSE, warning=FALSE}
 myFiles <- list.files(path = datadir, pattern='*263 pval25.xls')
 df.list <- lapply(paste0(datadir, myFiles), read_excel, skip = 1)
-names(df.list) <- gsub(" UpReg LFC 263 pval25.xls", "", myFiles)
+names(df.list) <- gsub(" UpReg LFC 263 pval25 with logCSP.xls", "", myFiles)
 
 UpRegPvS <- bind_rows(df.list, .id = "Comparison")
 UpRegPvS %>%
@@ -99,7 +99,7 @@ foo <- UpRegPvS_foo %>%
 UpRegPvS_label_df <-  UpRegPvS_foo %>%
   dplyr::filter(label %in% foo$label | #limit labels due to space limitations
                   (`Activation z-score` < -2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "Placebo")|
-                  (`Activation z-score` > 2.2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "Placebo")|
+                  (`Activation z-score` > 2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "Placebo")|
                   (`Activation z-score` < -2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "4.5x105")|
                   (`Activation z-score` > 2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "4.5x105")|
                   (`Activation z-score` < -2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "4.5x105")|
@@ -115,7 +115,7 @@ myUpRegPlot <- UpRegPvS_foo %>%
   geom_point(color = as.character(UpRegPvS_foo$color), alpha = 0.6) +
   geom_hline(yintercept = -log10(significance.cutoff), color = "blue", linetype = "dotted") +
   geom_vline(xintercept = c((-1*zscore.cutoff), zscore.cutoff), color = "red", linetype = "dotted") +
-  ggrepel::geom_label_repel(data = UpRegPvS_label_df, force = 18, force_pull = 1, size = 3.5, max.overlaps = 20,
+  ggrepel::geom_label_repel(data = UpRegPvS_label_df, force = 15, force_pull = 2, size = 3.4, max.overlaps = 25,
                             label.size = NA,
                             label.padding = 0.01,
                             box.padding = 0.01,
@@ -132,7 +132,7 @@ myUpRegPlot
 ```
 
 ```{r print to pdf, eval=FALSE, echo=FALSE}
-cairo_pdf(paste0(figdir, "Fig 2E IPA UpReg 4 doses 1x4 revised.pdf"), height = 6.25, width = 24.25)
+cairo_pdf(paste0(figdir, "Fig 2E IPA UpReg 4 doses 1x4 revised logCSP.pdf"), height = 6.55, width = 24)
 myUpRegPlot
 dev.off()
 ```

@@ -1,7 +1,7 @@
 ---
 title: "KSPZV1 DGE pre-immunization baseline - revised"
 author: "Tuan M. Tran"
-date: "01/31/2021"
+date: "05/03/2022"
 output: html_document
 ---
 
@@ -23,9 +23,11 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Perform differential gene expression using edgeR on pre-immunization baseline whole-blood samples from the KSPZV1 malaria vaccine trial. 
 Revised analysis includes adjustments for:
-1. Study site
-2. CSP Ab
-3. parasitemia at VAX1 (closest to baseline)
+
+1. Batch
+2. Study site
+3. log10(CSP Ab + 1)
+4. parasitemia at VAX1 (closest to baseline)
 
 ### Load ExpressionSet
 
@@ -95,6 +97,7 @@ for(i in names(ygroup)){
   Batch <- factor(xgroup[[i]]$SEQBATCH, levels = c("Aug2019","Nov2019"))
   Site <- as.factor(xgroup[[i]]$site)
   CSPAb <- as.integer(xgroup[[i]]$CSPAb)
+  CSPAb <- log10(CSPAb+1) #log transform CSP Ab data to make linear
   Pf_VAX1 <- as.factor(xgroup[[i]]$mal.vax.1)
   #This is the revised Timepoint 0 analysis.
   design <- model.matrix(~Batch + CSPAb + Site + Pf_VAX1 + Outcome)
@@ -113,6 +116,10 @@ for(i in names(degtab)){
     dplyr::select(7,8,10:14) %>%
     head(.,15)
   }
+```
+
+```{r save baseline data, echo=FALSE, eval=FALSE}
+# save(design, fit, degtab, file = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Revision R Objects/Baseline Model All Treatments Batch Site log10 CSPAb baseline Pf_VAX1 adj.RData")
 ```
 
 ### Examine top 15 DEGs (protected vs not protected)
@@ -313,8 +320,8 @@ print(BottomPlot)
 
 ```{r save plots 2, echo=FALSE, message=FALSE, warning=FALSE}
 #Figure S3A,B low-annotation level BTM. Hallmarkmodules
-# FigS3_plot <- ggpubr::ggarrange(MidPlot, BottomPlot, common.legend = TRUE, nrow=2)
-# ggsave("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Fig S3ABC revised lowBTM HALLMARK BloodGen3 GSEA Bubble Plot.pdf", FigS3_plot, device = "pdf", units = "in", height = 8, width = 14)
+FigS3_plot <- ggpubr::ggarrange(MidPlot, BottomPlot, common.legend = TRUE, nrow=2)
+ggsave("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Fig S3ABC revised lowBTM HALLMARK BloodGen3 GSEA Bubble Plot.pdf", FigS3_plot, device = "pdf", units = "in", height = 8, width = 14.5)
 ```
 
 ```{r save for IPA, echo = FALSE}
