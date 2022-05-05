@@ -10,7 +10,7 @@ Code for systems analysis of KSPZV1 malaria vaccine trial.
 
 [DGE and GSEA within and between Δ protected and Δ not protected for 1.8x10^6 PfSPZ group (REVISED)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-DGE-Delta-Postvax-High-Dose-PfSPZ-limma-voom-Revision.html)
 
-[DGE and GSEA between CSP-specific IgG high responders vs low responders in 1.8x10^6 PfSPZ treatment group, pre-immunization transcriptomes (REVISED)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-DGE-CSP-IgG-Response-Baseline.html)
+[DGE and GSEA between CSP-specific IgG high responders vs low responders in 1.8x10^6 PfSPZ treatment group, pre-immunization transcriptomes](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-DGE-CSP-IgG-Response-Baseline.html)
 
 ## Unsupervised hierarchical clustering heatmaps
 
