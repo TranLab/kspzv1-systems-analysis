@@ -1,7 +1,7 @@
 ---
 title: "KSPZV1 DGE pre-immunization baseline - revised"
 author: "Tuan M. Tran"
-date: "05/13/2022"
+date: "05/16/2022"
 output: html_document
 ---
 
@@ -102,13 +102,13 @@ for(i in names(ygroup)){
   CSPAb <- log10(CSPAb+1) #log transform CSP Ab data to make linear
   Pf_VAX1 <- as.factor(xgroup[[i]]$mal.vax.1)
   #This is the revised Timepoint 0 analysis.
-  design <- model.matrix(~Batch + CSPAb + Site + Pf_VAX1 + Outcome)
+  design <- model.matrix(~Batch + Sex + Site + CSPAb + Pf_VAX1 + Outcome)
   print(i)
   print(colnames(design))
   rownames(design) <- ygroup[[i]]$samples$PATID
   ygroup[[i]]     <- estimateDisp(ygroup[[i]],design, robust = TRUE)
   fit   <- glmQLFit(ygroup[[i]], design, robust = TRUE)
-  qlf <- glmQLFTest(fit, contrast = c(0,0,0,0,0,1))
+  qlf <- glmQLFTest(fit, contrast = c(rep(0, ncol(design)-1),1))
   degtab[[i]] <- topTags(qlf, n = nrow(ygroup[[i]]))$table
 }
 
@@ -314,7 +314,7 @@ bind_rows(GSEAtab, .id = "treatment") %>%
 
 ```{r save plots 1, echo=FALSE, eval=FALSE, message=FALSE, warning=FALSE}
 #Figure 2D high-annotation level BTM and Monaco modules
-Cairo::CairoPDF(file = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Revised Figure Panels/Fig 2D revised hiBTM Monaco GSEA Bubble Plot.pdf",
+Cairo::CairoPDF(file = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Revised Figure Panels/Fig 2D revised hiBTM Monaco GSEA Bubble Plot adj SEX.pdf",
                 width = 6.125, height = 5.65)
 TopPlot
 dev.off()
@@ -323,7 +323,7 @@ dev.off()
 ```{r save plots 2, echo=FALSE, eval=FALSE, message=FALSE, warning=FALSE}
 #Figure S3A,B low-annotation level BTM. Hallmarkmodules
 FigS3_plot <- ggpubr::ggarrange(MidPlot, BottomPlot, common.legend = TRUE, nrow=2)
-ggsave("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Revised Figure Panels/Fig S3ABC revised lowBTM HALLMARK BloodGen3 GSEA Bubble Plot.pdf", FigS3_plot, device = "pdf", units = "in", height = 8, width = 14.5)
+ggsave("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Revised Figure Panels/Fig S3ABC revised lowBTM HALLMARK BloodGen3 GSEA Bubble Plot adj SEX.pdf", FigS3_plot, device = "pdf", units = "in", height = 8, width = 14.5)
 ```
 
 ```{r save for IPA, eval=FALSE, echo = FALSE}
@@ -336,12 +336,12 @@ for(i in names(degtab)){
   }
 
 temp$Placebo %>%
-   write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev placebo IPA.csv"))
+   write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev placebo IPA adj SEX.csv"))
 temp$`4.5 x 10^5 PfSPZ` %>%
-   write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev lowdose IPA.csv"))
+   write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev lowdose IPA adj SEX.csv"))
 temp$`9.0 x 10^5 PfSPZ` %>%
-   write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev meddose IPA.csv"))
+   write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev meddose IPA adj SEX.csv"))
 temp$`1.8 x 10^6 PfSPZ` %>%
-   write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev highdose IPA.csv"))
+   write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev highdose IPA adj SEX.csv"))
 ```
 
