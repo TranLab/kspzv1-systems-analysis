@@ -1,0 +1,199 @@
+---
+title: "KSPZV1 LDA Plots and Other Alternatives to PCA"
+author: "Tuan M. Tran"
+date: "2/22/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objective
+
+Create LDA plot from baseline transcriptomic data
+
+## Load required packages
+
+```{r load libraries, include = TRUE, message=FALSE, warning=FALSE}
+library(miscTools)
+library(edgeR)
+library(Biobase)
+library(tidyverse)
+library(googledrive)
+library(data.table)
+library(ggpubr)
+library(devtools)
+library(MASS)
+figdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/"
+```
+
+## Load ExpressionSet
+
+```{r load cpm eset, message=FALSE, warning=FALSE}
+#local
+#x	<-	readRDS("/Volumes/GoogleDrive/My Drive/Tran Lab Shared/Projects/Doris Duke PfSPZ Kenya/Tuan PfSPZ/KenyaPfSPZ/Final Data Files/KSPZV1 logCPM expression sets for visualization/PfSPZ_cpm_ExpressionSet_244x21815_AllGroups_bothBatches_0_rmBatchFX_06082021_TMT_logTRUE.rds")
+#from google drive
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("1togaBlNIxiDj16FyXTC-r7Qw0A9cG2az"), path = temp, overwrite = TRUE)
+x <- readRDS(file = dl$local_path)
+x$treat <- factor(x$treat, levels = c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+```
+
+## Arrange Data
+
+Merge cpm with group factors
+
+```{r arrange data, echo=FALSE}
+#remove variable genes
+#mad filtering
+madsno <- as.integer(nrow(exprs(x))/4) #top N% most variable by MADS---of course you can also set madsno as an absolute value like 1000
+mads <- apply(exprs(x), 1, mad)  #mad filtering
+mads_filtered_cpm <-exprs(x)[mads > sort(mads, decr=TRUE)[madsno],]
+
+lda_df <- t(mads_filtered_cpm) %>%
+  data.frame() %>%
+  rownames_to_column(var = "SAMPLEID") %>%
+  left_join(., pData(x) %>%
+              mutate(NewClass = paste(treat, mal.atp.3, sep = "_")) %>%
+              mutate(NewClass = gsub("_0", " P", NewClass)) %>%
+              mutate(NewClass = gsub("_1", " NP", NewClass)) %>%
+              mutate(NewClass = factor(NewClass,
+                            levels = c("Placebo P",
+                                       "Placebo NP",
+                                       "4.5 x 10^5 PfSPZ P",
+                                       "4.5 x 10^5 PfSPZ NP",
+                                       "9.0 x 10^5 PfSPZ P",
+                                       "9.0 x 10^5 PfSPZ NP",
+                                       "1.8 x 10^6 PfSPZ P",
+                                       "1.8 x 10^6 PfSPZ NP"))) %>%
+              dplyr::select(SAMPLEID, NewClass, treat, mal.atp.3) ,
+            by = "SAMPLEID") %>%
+  column_to_rownames(var = "SAMPLEID")
+```
+
+### Standard PCA using DESeq2 plotPCA function
+
+```{r plotPCA, echo = TRUE}
+#https://sbc.shef.ac.uk/prostate-bioinformatics/rna-seq-preprocessing.nb.html
+
+library(DESeq2)
+x$Outcome <- ifelse(x$mal.atp.3==0, "protected","not protected")
+x$Treat_Outcome <- paste(x$treat, x$Outcome, sep = "_")
+x_male <- x[,x$SEX == "M"]
+x_female <- x[,x$SEX == "F"]
+x2 <- makeSummarizedExperimentFromExpressionSet(x)
+x2m <- makeSummarizedExperimentFromExpressionSet(x_male)
+x2f <- makeSummarizedExperimentFromExpressionSet(x_female)
+
+DESeq2::plotPCA(DESeqTransform(x2), intgroup=c("Treat_Outcome"), ntop = 10000)
+DESeq2::plotPCA(DESeqTransform(x2m), intgroup=c("Treat_Outcome"), ntop = 10000)
+DESeq2::plotPCA(DESeqTransform(x2f), intgroup=c("Treat_Outcome"), ntop = 10000) +
+  theme_bw()
+```
+
+```{r plotMDS, echo = TRUE}
+#https://sbc.shef.ac.uk/prostate-bioinformatics/rna-seq-preprocessing.nb.html
+
+library(DESeq2)
+x$Outcome <- ifelse(x$mal.atp.3==0, "protected","not protected")
+x$Treat_Outcome <- paste(x$treat, x$Outcome, sep = "_")
+x_male <- x[,x$SEX == "M"]
+x_female <- x[,x$SEX == "F"]
+
+x2 <- x[,x$treat == "Placebo" | x$treat == "1.8 x 10^6 PfSPZ"]
+points <- x2$Outcome
+points <- gsub("not protected", 17, points)
+points <- gsub("protected", 19, points)
+points <- as.integer(points)
+colors <- x2$treat
+colors <- gsub("Placebo", "#6f6f6e", colors)
+colors <- gsub("4.5 x 10\\^5 PfSPZ", "#fecd8b", colors)
+colors <- gsub("9.0 x 10\\^5 PfSPZ", "#f68d5d", colors)
+colors <- gsub("1.8 x 10\\^6 PfSPZ", "#d83327", colors)
+
+plotMDS(x2, top = nrow(x2), col = colors, pch = points, gene.selection = "pairwise")
+```
+
+### Call LDA
+
+```{r call lda, echo=FALSE}
+options(expressions = 500000)
+r <- lda_df %>%
+  dplyr::select(-c(NewClass, mal.atp.3)) %>%
+  lda(formula = treat ~ ., 
+         data = .)
+
+```
+
+## Plot
+
+```{r plot, echo = FALSE}
+require(ggplot2)
+require(scales)
+require(gridExtra)
+
+prop.lda = r$svd^2/sum(r$svd^2)
+
+plda <- predict(object = r,
+                newdata = lda_df)
+
+dataset = data.frame(class = lda_df[,"treat"],
+                     lda = plda$x)
+
+ggplot(dataset) +
+  geom_point(aes(lda.LD1, lda.LD2, colour = class, shape = factor(lda_df$mal.atp.3)), size = 2.5) +
+  labs(x = paste("LD1 (", percent(prop.lda[1]), ")", sep=""),
+       y = paste("LD2 (", percent(prop.lda[2]), ")", sep="")) +
+  theme_bw()
+```
+
+### Use FactoMineR and factoextra packages
+
+```{r load more packages and run, echo = FALSE}
+library(FactoMineR)
+library(factoextra)
+#remove variable genes
+#mad filtering
+madsno <- as.integer(nrow(exprs(x))/5) #top N% most variable by MADS---of course you can also set madsno as an absolute value like 1000
+mads <- apply(exprs(x), 1, mad)  #mad filtering
+mads_filtered_cpm <-exprs(x)[mads > sort(mads, decr=TRUE)[madsno],]
+
+pca_df <- t(mads_filtered_cpm) %>%
+  data.frame() %>%
+  rownames_to_column(var = "SAMPLEID") %>%
+  left_join(., pData(x) %>%
+              mutate(NewClass = paste(treat, mal.atp.3, sep = "_")) %>%
+              mutate(NewClass = gsub("_0", " P", NewClass)) %>%
+              mutate(NewClass = gsub("_1", " NP", NewClass)) %>%
+              mutate(NewClass = factor(NewClass,
+                            levels = c("Placebo P",
+                                       "Placebo NP",
+                                       "4.5 x 10^5 PfSPZ P",
+                                       "4.5 x 10^5 PfSPZ NP",
+                                       "9.0 x 10^5 PfSPZ P",
+                                       "9.0 x 10^5 PfSPZ NP",
+                                       "1.8 x 10^6 PfSPZ P",
+                                       "1.8 x 10^6 PfSPZ NP"))) %>%
+              dplyr::select(SAMPLEID, NewClass) ,
+            by = "SAMPLEID") %>%
+  column_to_rownames(var = "SAMPLEID")
+res.pca <- PCA(pca_df,
+               ncp = 5,
+               #quanti.sup = NULL,     # Quantitative supplementary variables
+               quali.sup = ncol(pca_df), # Qualitative supplementary variables
+               graph=FALSE)
+res.hcpc <- HCPC(res.pca, graph = FALSE)
+fviz_cluster(res.hcpc,
+             geom = c("point"),
+             repel = TRUE,            # Avoid label overlapping
+             show.clust.cent = TRUE, # Show cluster centers
+             palette = "jco",         # Color palette see ?ggpubr::ggpar
+             ggtheme = theme_bw(),
+             main = "Factor map"
+             )
+```
+
+
+ 

@@ -1,0 +1,849 @@
+---
+title: "all features model"
+author: "Leetah Senkpeil"
+date: "5/13/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libraries, include=FALSE}
+library(openxlsx)
+library(xgboost)
+library(dplyr)
+library(tidyverse)
+library(fgsea)
+library(glmnet)
+library(pROC)
+library(aod)
+library(caret)
+library(limma)
+library(caTools)
+library(e1071)
+library(robustbase)
+
+datadir <- "D:\\Research\\Manuscript\\"
+plotdir <- "D:\\Research\\Manuscript\\Baseline All Features\\"
+#load("D:\\Research\\My Scripts\\PfSPZ Scripts\\Baseline ML parameters_Allfeats_two_thirds_train.RData")
+
+```
+
+Load Expression Data (logCPM) and calculate pathway activity scores of modules interest
+```{r PAS}
+#calculate pathway activity scores from log CPM expression values
+#read in eset
+pfspz_cpm_SM6 <- readRDS(paste0(datadir,"PfSPZ_cpm_ExpressionSet_244x21815_AllGroups_bothBatches_0_rmBatchFX_06082021_TMT.rds"))
+lowBTMs <- readRDS(paste0(datadir,"lowBTMs.rds"))
+
+# data <- readRDS(paste0(datadir,'Manuscript\\PfSPZ_cpm_ExpressionSet_244x21815_AllGroups_bothBatches_0_rmBatchFX_06082021_TMT.rds'))
+# edata <- exprs(data)
+# feat <- fData(data)
+#myTimepoint <- "Baseline"#not necessary if using timepoint 0 eset only
+myDoseGroup <- c("Placebo")
+
+pfspz <- pfspz_cpm_SM6[,pfspz_cpm_SM6$treat == "Placebo"]
+
+# #reduce expression set
+# #pfspz_eset cmp.atp.3 has 0(no clinical malaria) and 1(clinical malaria) #change these to never_infected and infected
+# pfspz_cpm_SM6$cmp.atp.3 <- gsub("0", "never_infected", pfspz_cpm_SM6$cmp.atp.3)
+# pfspz_cpm_SM6$cmp.atp.3 <- gsub("1", "infected", pfspz_cpm_SM6$cmp.atp.3)
+# 
+# #pfspz_cpm_SM6 mal.atp.3 has 0(no parasitemia) and 1(parasitemia) #change these to never_infected and infected
+# pfspz_cpm_SM6$mal.atp.3 <- gsub("0", "never_infected", pfspz_cpm_SM6$mal.atp.3)
+# pfspz_cpm_SM6$mal.atp.3 <- gsub("1", "infected", pfspz_cpm_SM6$mal.atp.3)
+
+#set options for reduction
+#myBatch <- "Aug"
+#myTimepoint <- "Baseline"
+myDoseGroup <- c("1.8 x 10^6 PfSPZ")
+
+pfspz <- pfspz_cpm_SM6[,pfspz_cpm_SM6$treat %in% myDoseGroup]
+
+# #final reduction -- reduce exprs to just genes that are in the leading edge list
+# madsno <- as.integer(nrow(pfspz)/5)
+# mads <- apply(pfspz, 1, mad)  #mad filtering
+# pfspz <- pfspz[ mads > sort(mads, decr=TRUE)[madsno],]
+# #check size of eset
+# dim(pfspz)
+
+#scale data
+a <- exprs(pfspz) <- t(scale(t(exprs(pfspz)), center = TRUE, scale = TRUE)) #generating z scores using scale function
+rownames(a) <- fData(pfspz)$GeneSymbol
+#take out genes in each module from complete expression data frame
+annot.btm <- as.data.frame(unlist(names(lowBTMs)))
+pas <- c()
+for( i in 1:length(lowBTMs)){
+  pas[[i]] <- colMedians(matrix(a[intersect(unique(gsub(" ", "",lowBTMs[[i]])),rownames(a)),], ncol = ncol(pfspz)), na.rm = TRUE)#pathway activity score defined as column means/medians depending how COLFUN is defined above 
+  names(pas[[i]]) <- colnames(exprs(pfspz))
+}
+names(pas) <- names(lowBTMs)
+#annot <- as.data.frame(paste(annot.btm[,1], annot.btm[,2]))
+pas.df <- do.call("rbind", pas)
+pas.df.annot <- merge(annot.btm, pas.df, by.x=1, by.y=0)
+pas.df.annot <- na.omit(pas.df.annot)
+rownames(pas.df.annot) <- pas.df.annot$`unlist(names(lowBTMs))`
+pas.df.annot <- pas.df.annot[,-1]
+```
+
+Load Expression Data (logCPM) and calculate pathway activity scores of modules interest
+```{r PAS}
+#calculate pathway activity scores from log CPM expression values
+#read in eset
+# pfspz_cpm_SM6 <- readRDS(paste0(datadir,"PfSPZ_cpm_ExpressionSet_244x21815_AllGroups_bothBatches_0_rmBatchFX_06082021_TMT.rds"))
+# lowBTMs <- readRDS(paste0(datadir,"lowBTMs.rds"))
+
+#data <- readRDS(paste0(datadir,'Manuscript\\PfSPZ_cpm_ExpressionSet_244x21815_AllGroups_bothBatches_0_rmBatchFX_06082021_TMT.rds'))
+# edata <- exprs(data)
+# feat <- fData(data)
+#myTimepoint <- "Baseline"#not necessary if using timepoint 0 eset only
+# myDoseGroup <- c("Placebo")
+
+plpfspz <- pfspz_cpm_SM6[,pfspz_cpm_SM6$treat == "Placebo"]
+
+# #reduce expression set
+# #pfspz_eset cmp.atp.3 has 0(no clinical malaria) and 1(clinical malaria) #change these to never_infected and infected
+# pfspz_cpm_SM6$cmp.atp.3 <- gsub("0", "never_infected", pfspz_cpm_SM6$cmp.atp.3)
+# pfspz_cpm_SM6$cmp.atp.3 <- gsub("1", "infected", pfspz_cpm_SM6$cmp.atp.3)
+# 
+# #pfspz_cpm_SM6 mal.atp.3 has 0(no parasitemia) and 1(parasitemia) #change these to never_infected and infected
+# pfspz_cpm_SM6$mal.atp.3 <- gsub("0", "never_infected", pfspz_cpm_SM6$mal.atp.3)
+# pfspz_cpm_SM6$mal.atp.3 <- gsub("1", "infected", pfspz_cpm_SM6$mal.atp.3)
+
+#set options for reduction
+#myBatch <- "Aug"
+#myTimepoint <- "Baseline"
+
+
+# #final reduction -- reduce exprs to just genes that are in the leading edge list
+# madsno <- as.integer(nrow(pfspz)/5)
+# mads <- apply(pfspz, 1, mad)  #mad filtering
+# pfspz <- pfspz[ mads > sort(mads, decr=TRUE)[madsno],]
+# #check size of eset
+# dim(pfspz)
+
+#scale data
+pla <- exprs(plpfspz) <- t(scale(t(exprs(plpfspz)), center = TRUE, scale = TRUE)) #generating z scores using scale function
+rownames(pla) <- fData(plpfspz)$GeneSymbol
+#take out genes in each module from complete expression data frame
+plannot.btm <- as.data.frame(unlist(names(lowBTMs)))
+plpas <- c()
+for( i in 1:length(lowBTMs)){
+  plpas[[i]] <- colMedians(matrix(pla[intersect(unique(gsub(" ", "",lowBTMs[[i]])),rownames(pla)),], ncol = ncol(plpfspz)), na.rm = TRUE)#pathway activity score defined as column means/medians depending how COLFUN is defined above 
+  names(plpas[[i]]) <- colnames(exprs(plpfspz))
+}
+names(plpas) <- names(lowBTMs)
+#annot <- as.data.frame(paste(annot.btm[,1], annot.btm[,2]))
+plpas.df <- do.call("rbind", plpas)
+plpas.df.annot <- merge(plannot.btm, plpas.df, by.x=1, by.y=0)
+plpas.df.annot <- na.omit(plpas.df.annot)
+rownames(plpas.df.annot) <- plpas.df.annot$`unlist(names(lowBTMs))`
+plpas.df.annot <- plpas.df.annot[,-1]
+```
+
+```{r select variables of interest}
+
+pfspz_facs <- readRDS(paste0(datadir, "PfSPZ_FACS_PlasmaCytokine_MonocyteActivation_05012021 (1).rds"))
+
+pfspz_facs <- pfspz_facs %>%
+  #dplyr::select(!contains("Timepoint")) %>%
+  dplyr::select(!contains("log2 fold-change anti-CSP IgG")) %>%
+  dplyr::select(!contains("FACS_CD3+_of_live_lymphocytes")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_CD3+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD3+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_CD3+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_CD3+CD4+_of_live_lymphocytes")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_CD3+CD4+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD3+CD4+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_CD3+CD4+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_CD3+CD8+_of_live_lymphocytes")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_CD3+CD8+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD3+CD8+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_CD3+CD8+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CD19+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD19+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_Plasmablasts_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_Plasmablasts_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CSP-specific_memory_B_cells_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CSP-specific_memory_B_cells_of_live_leukocytes")) %>%
+  # dplyr::select(!contains("FACS_CD11c+_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD11c+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CD14+_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD14+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CD56+CD16+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD56+CD16+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_memory_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_naive_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_IgG+_of_memory")) %>%
+  dplyr::select(!contains("FACS_IgM+_of_memory")) %>%
+  dplyr::select(!contains("FACS_IgG-IgM-_of_memory")) %>%
+  dplyr::select(!contains("FACS_CSP-spec_of_memory_B_cells")) %>%
+  dplyr::select(!contains("FACS_CSP-spec_of_B_cells")) %>%
+  #dplyr::select(!contains("FACS_IgG_of_CSP-spec")) %>%
+  #dplyr::select(!contains("FACS_IgM_of_CSP-spec")) %>%
+  #dplyr::select(!contains("FACS_IgG-IgM-_of_CSP-spec")) %>%
+  dplyr::select(!contains("FACS_PBs_of_memory")) %>%
+  dplyr::select(!contains("FACS_PBs_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_atypical_memory_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_immature_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_TCRgd")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vd1_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vd1_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vd1_of_TCRgd")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vd1_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vd1/2-_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vd1/2-_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vd1/2-_of_TCRgd")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vd1/2-_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vd2_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vd2_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vd2_of_TCRgd")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vd2_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vg9-_of_Vd2_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vg9-_of_Vd2_cells")) %>%
+  dplyr::select(!contains("FACS_Vg9-Vd2+_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vg9-Vd2+_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vg9-Vd2+_of_TCRgd")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vg9-Vd2+_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vg9+_of_Vd2_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vg9+_of_Vd2_cells")) %>%
+  dplyr::select(!contains("FACS_Vg9+Vd2+_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vg9+Vd2+_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vg9+Vd2+_of_TCRgd")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vg9+Vd2+_of_TCRgd")) %>%
+  #dplyr::select(!contains("FACS_CD14+CD16+_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD14+CD16+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CD14+CD16-_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD14+CD16-_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_CD14-CD16+_of_live_monocytes")) %>%
+  # dplyr::select(!contains("CytokineObsConc_CCL2_MCP-1")) %>%
+  # dplyr::select(!contains("CytokineObsConc_CCL4_MIP-1_beta")) %>%
+  # dplyr::select(!contains("CytokineObsConc_CXCL10_IP-10")) %>%
+  # dplyr::select(!contains("CytokineObsConc_GM-CSF")) %>%
+  # dplyr::select(!contains("CytokineObsConc_IFN-alpha")) %>%
+  # dplyr::select(!contains("CytokineObsConc_IFN-beta")) %>%
+  # dplyr::select(!contains("CytokineObsConc_IFN-gamma")) %>%
+  # dplyr::select(!contains("CytokineObsConc_IL-1_beta")) %>%
+  # dplyr::select(!contains("CytokineObsConc_IL-10")) %>%
+  # dplyr::select(!contains("CytokineObsConc_IL-12_p70")) %>%
+  # dplyr::select(!contains("CytokineObsConc_IL-2")) %>%
+  # dplyr::select(!contains("CytokineObsConc_IL-4")) %>%
+  # dplyr::select(!contains("CytokineObsConc_IL-6")) %>%
+  # dplyr::select(!contains("CytokineObsConc_IL-8_CXCL8")) %>%
+  # dplyr::select(!contains("CytokineObsConc_TNF-alpha")) %>%
+  dplyr::select(!contains("ICS_IL-1ß_pct_of_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_IL-1ß_Count")) %>%
+  dplyr::select(!contains("ICS_IL-1ß_MFI_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_IL-8_pct_of_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_IL-8_Count")) %>%
+  dplyr::select(!contains("ICS_IL-8_MFI_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_TNF_pct_of_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_TNF_count")) %>%
+  dplyr::select(!contains("ICS_TNF_MFI_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_CD86_MFI_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_HLA-DR_MFI_live_monocytes"))
+  #dplyr::select(!contains("FACS_CD14-CD16+_of_live_PBMCs")) ######this line was shifted down
+
+```
+make dataset with all features for feature elimination
+```{r all features}
+
+
+#order columns like pas.df.annot
+pas.temp <- pas.df.annot
+subj <- colnames(pas.temp)
+ind <- which(pfspz_facs$PATID.OG %in% subj)
+facs.temp <- as.data.frame(pfspz_facs[ind,])
+rownames(facs.temp) <- facs.temp$PATID.OG
+facs.temp <- t(facs.temp[,-c(1,2)])
+facs.temp <- facs.temp[,order(colnames(facs.temp))]
+pas.temp <- pas.temp[,order(colnames(pas.temp))]
+
+pas.temp <- rbind(facs.temp,pas.temp)
+
+#imputation of missing features
+pas2 <- t(pas.temp)
+inds <- which(rowSums(is.na(pas2)) > nrow(pas2)/2)
+
+#lymph <- grep("live_lymphocytes", colnames(pas2))
+#pbmcs <- grep("live_PBMCs", colnames(pas2))
+#pf_sp <- grep("PfSPZ-specific",colnames(pas2))
+
+library(missMDA)
+#pas2 <- pas2[,lymph]
+if(length(inds) > 0){
+  pas_imp <- pas2[-inds,]
+} else {pas_imp <- pas2}
+
+cn <- colnames(pas_imp)
+pas_imp <- t(pas_imp)
+imp <- MIPCA(pas_imp)
+pas_imputed <- imp$res.imputePCA
+
+pas.df.annot <- pas_imputed
+
+```
+
+make dataset with all features for feature elimination
+```{r all features}
+
+
+#order columns like pas.df.annot
+plpas.temp <- plpas.df.annot
+plsubj <- colnames(plpas.temp)
+plind <- which(pfspz_facs$PATID.OG %in% plsubj)
+plfacs.temp <- as.data.frame(pfspz_facs[plind,])
+rownames(plfacs.temp) <- plfacs.temp$PATID.OG
+plfacs.temp <- t(plfacs.temp[,-c(1,2)])
+plfacs.temp <- plfacs.temp[,order(colnames(plfacs.temp))]
+plpas.temp <- plpas.temp[,order(colnames(plpas.temp))]
+
+plpas.temp <- rbind(plfacs.temp,plpas.temp)
+
+#imputation of missing features
+plpas2 <- t(plpas.temp)
+plinds <- which(rowSums(is.na(plpas2)) > nrow(plpas2)/2)
+
+#lymph <- grep("live_lymphocytes", colnames(pas2))
+#pbmcs <- grep("live_PBMCs", colnames(pas2))
+#pf_sp <- grep("PfSPZ-specific",colnames(pas2))
+
+library(missMDA)
+#pas2 <- pas2[,lymph]
+if(length(plinds) > 0){
+  plpas_imp <- plpas2[-plinds,]
+} else {plpas_imp <- plpas2}
+
+plcn <- colnames(plpas_imp)
+plpas_imp <- t(plpas_imp)
+plimp <- MIPCA(plpas_imp)
+plpas_imputed <- plimp$res.imputePCA
+
+plpas.df.annot <- plpas_imputed
+
+```
+
+```{r recursive feature elimination}
+
+model_df <- t(pas.df.annot)
+#model_df <- model_df[-c(1,2),]
+outcome <- as.data.frame(pfspz[,which(pfspz$SAMPLEID %in% rownames(model_df))]$mal.atp.3)
+rownames(outcome) <- pfspz[,which(pfspz$SAMPLEID %in% rownames(model_df))]$SAMPLEID
+colnames(outcome) <- "Outcome3mos"
+outcome$Outcome3mos <-  gsub("never_infected", 0, outcome$Outcome3mos)
+outcome$Outcome3mos <- gsub("infected", 1, outcome$Outcome3mos)
+
+outcome <- as.factor(unlist(outcome))
+
+
+set.seed(0623)
+temp <- sample_n(as.data.frame(model_df), (nrow(model_df)*(2/3)))
+indices <- which(rownames(model_df) %in% rownames(temp))
+
+
+#check size of eset
+dim(pfspz)
+model_df_tr <- data.frame(model_df[indices,])
+outcome_tr <- outcome[indices]
+
+model_df_t <- data.frame(model_df[-indices,])
+outcome_t <- outcome[-indices]
+
+featlist <- list()
+feat_seeds <- list()
+for(iii in c(1:5)){
+  temp.seed <- sample.int(10000,1)[[1]]
+  set.seed(temp.seed)
+  feats <- rfe(model_df_tr, outcome_tr, sizes = 3:5, metric = 'Accuracy', maximize = TRUE, rfeControl = rfeControl())
+  featlist[[iii]] <- feats$optVariables[1:5]
+  feat_seeds[[i]] <- temp.seed
+}
+
+
+feats
+```
+
+```{r find feats}
+
+temp <- unlist(featlist[1])
+#temp <- t(temp)
+
+
+for(i in 2:5){
+  temp2 <- unlist(featlist[i])
+  temp <- c(temp,temp2)
+
+}
+
+
+feat_df <- as.data.frame(unique(temp))
+for(i in 1:17){ #change to match num of unique features
+  feat_df[i,2] <- length(which(temp == feat_df[i,1]))
+}
+
+feat_df <- feat_df[order(feat_df[,2], decreasing = T),]#order feats decreasing from most to least chosen
+
+
+```
+
+with selected features (PAS) use xgboost to predict infection status from transcriptional data
+```{r machine learning}
+
+
+# #feats <- feat_df[c(1:4),1]#set features to top 5 most common features from 100 rds feat. selection
+feats <- c("FACS_CD14+_of_live_monocytes","spliceosome (M250)","proteasome (M226)", "MHC-TLR7-TLR8 cluster (M146)")
+#feats <- c("FACS_CSP-specific_memory_B_cells_of_live_lymphocytes", "FACS_CD56+CD16+_of_live_lymphocytes", "CytokineObsConc_IL-8_CXCL8",
+   #        "cytoskeleton/actin (SRF transcription targets) (M145.0)", "NK cell surface signature (S1)")
+pas_df <- pas.df.annot
+
+plpas_df <- plpas.df.annot
+#pas_df$`Module title` <- paste(pas.df.annot$ID,pas.df.annot$`Module title`, sep = ": ")
+
+common <- intersect(rownames(pas_df), feats)
+plcommon <- intersect(rownames(plpas_df), feats)
+model_df <- as.data.frame(t(pas_df[which(rownames(pas_df) %in% common),]))
+plmodel_df <- as.data.frame(t(plpas_df[which(rownames(plpas_df) %in% plcommon),]))
+
+
+pfspz_train <- pfspz_cpm_SM6[,pfspz_cpm_SM6$SAMPLEID %in% rownames(model_df)]
+outcome <- as.data.frame(pfspz_train$mal.atp.3)
+rownames(outcome) <- pfspz_train$SAMPLEID
+colnames(outcome) <- "Outcome3mos"
+outcome$Outcome3mos <- as.character(outcome$Outcome3mos)
+
+pfspz_test <- pfspz_cpm_SM6[,pfspz_cpm_SM6$SAMPLEID %in% rownames(plmodel_df)]
+ploutcome <- as.data.frame(pfspz_test$mal.atp.3)
+rownames(ploutcome) <- pfspz_test$SAMPLEID
+colnames(ploutcome) <- "Outcome3mos"
+
+
+
+#check that outcome and model_df are in the same order
+model_df$SubjID <- rownames(model_df)
+outcome$SubjID <- rownames(outcome)
+length(match(rownames(outcome), rownames(model_df)))
+model_df <- left_join(model_df, outcome)
+model_df$Outcome3mos <- gsub("never_infected", 0, model_df$Outcome3mos)
+model_df$Outcome3mos <- gsub("infected", 1, model_df$Outcome3mos)
+rownames(model_df) <- model_df$SubjID
+model_df <- model_df[,-which(colnames(model_df) == "SubjID")] #Removing SubjID
+
+#check that outcome and model_df are in the same order
+plmodel_df$SubjID <- rownames(plmodel_df)
+ploutcome$SubjID <- rownames(ploutcome)
+length(match(rownames(ploutcome), rownames(plmodel_df)))
+plmodel_df <- left_join(plmodel_df, ploutcome)
+plmodel_df$Outcome3mos <- gsub( 0,"never_infected", plmodel_df$Outcome3mos)
+plmodel_df$Outcome3mos <- gsub(1, "infected", plmodel_df$Outcome3mos)
+plmodel_df$Outcome3mos <- gsub( "never_infected",1, plmodel_df$Outcome3mos)
+plmodel_df$Outcome3mos <- gsub( "infected",0, plmodel_df$Outcome3mos)
+
+rownames(plmodel_df) <- plmodel_df$SubjID
+plmodel_df <- plmodel_df[,-which(colnames(plmodel_df) == "SubjID")] #Removing SubjID
+
+
+
+#indices2 <- which(rownames(model_df) %in% rownames(model_df_tr))
+save_indices <- indices
+
+#create training and test sets
+train_df <- model_df[indices,]
+train.rows <- rownames(train_df)
+test_df <- plmodel_df#[-indices,]
+test.rows <- rownames(test_df)
+
+
+train <- matrix(as.numeric(as.character(unlist(train_df))), ncol = ncol(train_df))
+colnames(train) <- colnames(train_df)
+test <- matrix(as.numeric(unlist(test_df)), ncol = ncol(test_df))
+colnames(test) <-  colnames(test_df)
+all <- matrix(as.numeric(unlist(model_df)), ncol = ncol(model_df))
+colnames(all) <-  colnames(model_df)
+
+#build xgboost datasets
+d.train <- xgb.DMatrix(data = train[,-ncol(train)], label = (train[,ncol(train)]))#
+d.test <- xgb.DMatrix(data = test[,-ncol(test)], label = (test[,ncol(test)]))#indices need to match training
+#d.all <- xgb.DMatrix(data = all[,-ncol(all)], label = (all[,ncol(all)]))
+
+temp.seed <- sample.int(10000,1)[[1]]
+
+#Looping to train best parameters
+
+best_param <- list()
+best_seednumber = temp.seed
+best_error = Inf
+
+featlist <- list()
+list_param <- list()
+error_list <- list()
+
+# for (i in 1:50) {
+#   rm(model_df)
+#   start_df <- t(pas.df.annot)
+#   #model_df <- model_df[-c(1,2),]
+#   outcome <- as.data.frame(pfspz[,which(pfspz$SAMPLEID %in% rownames(start_df))]$mal.atp.3)
+#   rownames(outcome) <- pfspz[,which(pfspz$SAMPLEID %in% rownames(start_df))]$SAMPLEID
+#   colnames(outcome) <- "Outcome3mos"
+#   outcome$Outcome3mos <-  gsub("never_infected", 0, outcome$Outcome3mos)
+#   outcome$Outcome3mos <- gsub("infected", 1, outcome$Outcome3mos)
+#   
+#   outcome <- as.factor(unlist(outcome))
+#   
+#   
+#   temp <- sample_n(as.data.frame(start_df), (nrow(start_df)*(2/3)))
+#   indices <- which(rownames(start_df) %in% rownames(temp))
+#   
+#   
+#   #check size of eset
+#   dim(pfspz)
+#   model_df_tr <- data.frame(start_df[indices,])
+#   outcome_tr <- outcome[indices]
+#   
+#   model_df_t <- data.frame(start_df[-indices,])
+#   outcome_t <- outcome[-indices]
+#   
+#   feats <- rfe(model_df_tr, outcome_tr, sizes = 3:5, metric = 'Accuracy', maximize = TRUE, rfeControl = rfeControl())
+#   
+#   best_param <- list()
+#   best_seednumber = temp.seed
+#   best_error = Inf
+#   
+#   pas_df <- pas.df.annot
+#   #pas_df$`Module title` <- paste(pas.df.annot$ID,pas.df.annot$`Module title`, sep = ": ")
+#   
+#   
+#   if(length(feats$optVariables) >= 4){
+#   model_ind <- c(grep(feats$optVariables[1], rownames(pas_df)),grep(feats$optVariables[2], rownames(pas_df)),grep(feats$optVariables[3], rownames(pas_df)),grep(feats$optVariables[4], rownames(pas_df)))}
+#   else if(length(feats$optVariables) == 3){
+#     odel_ind <- c(grep(feats$optVariables[1], rownames(pas_df)),grep(feats$optVariables[2], rownames(pas_df)),grep(feats$optVariables[3],rownames(pas_df)))
+#   }
+#   
+  
+  # model_df <- as.data.frame(t(pas_df[model_ind,]))
+  # 
+  # pfspz_train <- pfspz_cpm_SM6[,pfspz_cpm_SM6$SAMPLEID %in% rownames(model_df)]
+  # outcome <- as.data.frame(pfspz_train$mal.atp.3)
+  # rownames(outcome) <- pfspz_train$SAMPLEID
+  # colnames(outcome) <- "Outcome3mos"
+  # 
+  # 
+  # #check that outcome and model_df are in the same order
+  # model_df$SubjID <- rownames(model_df)
+  # outcome$SubjID <- rownames(outcome)
+  # length(match(rownames(outcome), rownames(model_df)))
+  # model_df <- left_join(model_df, outcome)
+  # model_df$Outcome3mos <- gsub("never_infected", 0, model_df$Outcome3mos)
+  # model_df$Outcome3mos <- gsub("infected", 1, model_df$Outcome3mos)
+  # rownames(model_df) <- model_df$SubjID
+  # model_df <- model_df[,-which(colnames(model_df) == "SubjID")] #Removing SubjID
+  # 
+  # #indices2 <- which(rownames(model_df) %in% rownames(model_df_tr))
+  # save_indices <- indices
+  # 
+  # #create training and test sets
+  # train_df <- model_df[indices,]
+  # train.rows <- rownames(train_df)
+  # test_df <- model_df[-indices,]
+  # test.rows <- rownames(test_df)
+  # 
+  # 
+  # train <- matrix(as.numeric(as.character(unlist(train_df))), ncol = ncol(train_df))
+  # colnames(train) <- colnames(train_df)
+  # test <- matrix(as.numeric(unlist(test_df)), ncol = ncol(test_df))
+  # colnames(test) <-  colnames(test_df)
+  # all <- matrix(as.numeric(unlist(model_df)), ncol = ncol(model_df))
+  # colnames(all) <-  colnames(model_df)
+  # 
+  # #build xgboost datasets
+  # d.train <- xgb.DMatrix(data = train[,-ncol(train)], label = (train[,ncol(train)]))#
+  # d.test <- xgb.DMatrix(data = test[,-ncol(test)], label = (test[,ncol(test)]))#indices need to match training
+  # #d.all <- xgb.DMatrix(data = all[,-ncol(all)], label = (all[,ncol(all)]))
+  
+  
+  for (iter in 1:1000) {
+    print(glue::glue("Curr Iter: ", iter, " Best Error: ", best_error))
+    param <- list(objective = 'binary:logistic',
+                  max_depth = sample(2:15,1),
+                  eta = runif(1, 0.01, 0.5),
+                  gamma = sample(c(0, 0.1, 0.2, 0.5, 1, 2, 5, 10), 1),
+                  subsample = runif(1, 0, 1),
+                  colsample_bytree = runif(1, 0, 1),
+                  min_child_weight = sample(0:10, 1),
+                  lambda = sample(c(0, 0.1, 0.2, 0.5, 1, 2, 5, 10), 1),
+                  labmda_bias = sample(c(0, 0.1, 0.2, 0.5, 1, 2, 5, 10), 1),
+                  alpha = sample(c(0, 0.1, 0.2, 0.5, 1, 2, 5, 10), 1)
+    )
+    
+    
+    
+    cv.nround = 1000
+    cv.nfold = 3
+    seed.number = sample.int(10000,1)[[1]]
+    set.seed(seed.number)
+    mdcv <- xgb.cv(data=d.train, verbose = F, params = param, nfold = cv.nfold,
+                      nrounds = cv.nround, early_stopping_rounds = 30, maximize = FALSE, metrics = "error")
+    min_error = min(mdcv$evaluation_log$test_error_mean)
+  
+    if (min_error < best_error) {
+      best_error = min_error
+      best_nround = which.min(mdcv$evaluation_log$test_error_mean)
+      best_seednumber = seed.number
+      best_param = param
+      
+     
+      
+    }
+     
+  }
+#}
+
+
+#best_param2 <- best_param #from saved Rdata file
+# best_param2$gamma <- 1
+# best_param2$lambda <- 0.75
+# best_param2$eta <- .2880929
+# best_param2$alpha <- 0.1
+# best_param2$max_depth <- 5
+# best_param2$colsample_bytree <- 0.269194
+# best_param2$min_child_weight <- 0
+
+temp.seed <- sample.int(10000,1)[[1]]
+set.seed(3549)#set from saved data
+model <- xgb.train(data = d.train, params = best_param2,nrounds = 50000, watchlist = list(val = d.test, train = d.train), early_stopping_rounds = 400, print_every_n = 10, maximize = F, eval_metric = "error")
+
+# 3131
+#3549
+#9647
+#2443
+#3497
+#5863
+# seed1 <- temp.seed #23% val error
+# seed2 <- temp.seed #23% val error
+# seed3 <- temp.seed #14% val error
+# seed4 <- temp.seed #19% val error
+# seed5 <- temp.seed #23% val error
+# seed6 <- temp.seed #19% val error
+# seed7 <- temp.seed #23% val error
+# seed8 <- temp.seed #28% val error
+# seed9 <- temp.seed #19% val error
+# seed10 <- temp.seed #33% val error
+# seed11 <- temp.seed #23% val error
+# seed12 <- temp.seed #28% val error
+# models with placebo feature selection features
+# seed1a <- temp.seed #23.8% val error, 232
+# seed2a <- temp.seed #23% val error
+# seed3a <- temp.seed #23% val error
+# seed4a <- temp.seed #23% val error
+# seed5a <- temp.seed #23% val error
+# seed6a <- temp.seed #19% val error
+# seed7a <- temp.seed #33% val error
+# seed8a <- temp.seed #28% val error
+# seed9a <- temp.seed #19% val error
+# seed10a <- temp.seed #33% val error
+# seed11a <- temp.seed #28% val error
+# seed12a <- temp.seed #19% val error
+
+pred <- predict(model, newdata = test[,c(1:(ncol(test)-1))])
+
+(sum((pred >= 0.5) == (test[,ncol(test)] == 1)))/length(test[,ncol(test)])
+
+imp <- xgb.importance(feature_names = colnames(train[,-5]), model = model) 
+xgb.plot.importance(importance_matrix = imp)
+
+plot_imp <- ggplot(data = imp, aes(x = Importance, y = reorder(Feature, Importance))) +
+    geom_bar(stat = 'identity',fill = "#fef0d9", width = 0.95) +
+    theme_classic(base_family = "sans", base_size = 6) +
+    theme(axis.ticks = element_line(color = "grey80")) +
+    ggtitle("Baseline Transcriptomics Feature Importance") +
+    xlab("Importance") + ylab("Features") +
+    theme(plot.title=element_text(size =6, hjust = 1, vjust = -1), aspect.ratio = 0.75, axis.text.x.bottom =element_text(size =6)) +
+    theme(legend.position = "none")
+  
+cairo_pdf(paste0(plotdir,"Placebo All Features baseline ML Importance Plot.pdf"),width = 3, height = 2.5)
+
+print(plot_imp)
+
+dev.off()
+
+```
+
+The purpose of this chunk is to make use of xgboostExplainer to understand the impact of each feature on the model -- making logistic regression model more transparent
+```{r xgb explain}
+library(xgboostExplainer)
+
+#predictions
+pred.test <- predict(model, newdata = test[,c(1:(ncol(test)-1))])#using test data as newdata -- can use all data according to xgboost documentation
+nodes.test <- predict(model, newdata = test[,c(1:(ncol(test)-1))], predleaf = TRUE)
+
+#build tree using model nodes and features
+trees <- xgb.model.dt.tree(colnames(d.train), model = model)
+
+#step 1: build explainer
+explainer <- buildExplainer(model, d.train, type = "binary")#build explanations for nodes/leafs
+pred.breakdown <- explainPredictions(model, explainer, d.test)#predictions explained
+
+#show waterfall
+for (i in 1:nrow(test)){
+water <- showWaterfall(model, explainer, d.test, test[,c(1:(ncol(test)-1))],i,type = "binary")
+
+cairo_pdf(paste0(plotdir,"Waterfall\\All Features Baseline Waterfall_", seed2, "_", i, "_.pdf"),width = 3, height = 2.5)
+
+print(water)
+
+dev.off()  
+}
+
+trees
+
+```
+
+```{r xgb shap summary plot}
+xgb.ggplot.shap.summary <- function(data, shap_contrib = NULL, features = NULL, top_n = 10, model = NULL,
+                                    trees = NULL, target_class = NULL, approxcontrib = FALSE, subsample = NULL) {
+  data_list <- xgboost:::xgb.shap.data(
+    data = data,
+    shap_contrib = shap_contrib,
+    features = features,
+    top_n = top_n,
+    model = model,
+    trees = trees,
+    target_class = target_class,
+    approxcontrib = approxcontrib,
+    subsample = subsample,
+    max_observations = 10000  # 10,000 samples per feature.
+  )
+  plot_outcome <- rep(test[,ncol(test)], 3)
+  p_data <- xgboost:::prepare.ggplot.shap.data(data_list, normalize = TRUE)
+  # Reverse factor levels so that the first level is at the top of the plot
+  p_data[, "feature" := factor(feature, rev(levels(feature)))]
+  p <- ggplot2::ggplot(p_data, ggplot2::aes(x = feature, y = p_data$shap_value, colour = p_data$feature_value)) +
+    ggplot2::geom_jitter(alpha = 1, width = 0.1, height = 0.1, size = 2) +
+    ggplot2::scale_colour_distiller(limits = c(-1.5, 1.5), na.value = 0, type = "div", palette = "Spectral", direction = 1) +
+    ggplot2::geom_abline(slope = 0, intercept = 0, colour = "darkgrey") +
+    ggplot2::coord_flip()
+
+  p
+}
+
+
+```
+
+
+ROC curves for ML model
+```{r ggROC}
+library(pROC)
+
+roc1 <- pROC::roc(test[,ncol(test)], pred)
+roc1 <- smooth(roc1)
+
+
+ggroc <- function(roc, showAUC = TRUE, interval = 0.2, breaks = seq(0, 1, interval)){
+  require(pROC)
+  if(class(roc) != "roc")
+    simpleError("Please provide roc object from pROC package")
+  plotx <- rev(roc$specificities)
+  ploty <- rev(roc$sensitivities)
+  
+  ggplot(NULL, aes(x = plotx, y = ploty)) +
+    geom_segment(aes(x = 0, y = 1, xend = 1,yend = 0), alpha = 0.5, colour = "red") + 
+    geom_step() +
+    scale_x_reverse(name = "Specificity",limits = c(1,0), breaks = breaks, expand = c(0.001,0.001)) + 
+    scale_y_continuous(name = "Sensitivity", limits = c(0,1), breaks = breaks, expand = c(0.001, 0.001)) +
+    theme_bw(base_family = "sans", base_size = 6) +
+    theme(axis.ticks = element_line(color = "grey80")) +
+    coord_equal() + 
+    annotate("text", x = interval*3, y = interval*3, vjust = 0, label = paste("AUC =",sprintf("%.3f",roc$auc)), family = "sans", size = 4) +
+    geom_area(fill = "black", alpha = .4) +
+    ggtitle("Baseline All Features Model")+
+    theme(plot.title=element_text(size =4))
+}
+
+p <- ggroc(roc1)
+p + scale_fill_hue(l = 45)
+
+cairo_pdf(paste0(plotdir,"Placebo All feats baseline ML ROC.pdf"), width = 1.5, height = 1.5)
+
+print(p)
+
+dev.off()
+# Set our cutoff threshold
+pred.resp <- ifelse(pred >= 0.50, 1, 0)
+ 
+# Create the confusion matrix
+cm <- ModelMetrics::confusionMatrix(test[,ncol(test)],pred.resp)
+
+cm
+
+#create shap plot to visualize feature size and contribution to the model
+shap <- xgb.ggplot.shap.summary(data = test[,c(1:(ncol(test)-1))], model = model) +
+    theme_classic(base_family = "sans", base_size = 6) +
+    theme(axis.ticks = element_line(color = "grey80")) +
+    ggtitle("Baseline Global Feature Impact") +
+    ylab("SHAP value (impact on model output)") + xlab(NULL) +
+    theme(plot.title=element_text(size =6, hjust = 1, vjust = -1), aspect.ratio = .5, axis.text.x =element_text(size =6), axis.text.y =element_text(size =6)) +
+    theme(legend.position = "bottom") + labs(color ="Feature Value")
+  
+cairo_pdf(paste0(plotdir,"Placebo Baseline SHapley Additive exPlanations All feats.pdf"),width = 3.5, height = 2)
+
+print(shap)
+
+dev.off()
+
+39/64
+
+```
+
+```{r random forest}
+install.packages("caTools")       # For sampling the dataset
+install.packages("randomForest")  # For implementing random forest algorithm
+  
+# Loading package
+library(caTools)
+library(randomForest)
+  
+# Splitting data in train and test data
+split <- sample.split(t(model_df), SplitRatio = 0.7)
+split
+  
+train <- subset(model_df, split == "TRUE")
+test <- subset(model_df, split == "FALSE")
+
+train <- na.omit(train)
+train$Outcome3mos <- as.numeric(train$Outcome3mos)
+test <- na.omit(test)
+  
+# Fitting Random Forest to the train dataset
+set.seed(120)  # Setting seed
+classifier_RF = randomForest(x = train[-5],
+                             y = train$Outcome3mos,
+                             ntree = 500)
+  
+classifier_RF
+  
+# Predicting the Test set results
+y_pred = predict(classifier_RF, newdata = test[-5])
+pred.resp <- ifelse(y_pred >= 0.50, 1, 0)  
+# Confusion Matrix
+confusion_mtx = table(test[, 5], y_pred)
+confusion_mtx
+
+y_pred <- as.numeric(y_pred)
+cm <- ModelMetrics::confusionMatrix(as.numeric(test[,ncol(test)]),pred.resp)
+
+roc1 <- pROC::roc(as.numeric(test_set[,ncol(test_set)]), as.numeric(y_pred))
+roc1 <- smooth(as.numeric(roc1))
+
+caret::RMSE(as.numeric(test_set[,ncol(test_set)]),as.numeric(y_pred)) 
+# Plotting model
+plot(classifier_RF)
+  
+# Importance plot
+importance(classifier_RF)
+  
+# Variable importance plot
+varImpPlot(classifier_RF)
+```
+
