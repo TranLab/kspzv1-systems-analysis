@@ -1,0 +1,675 @@
+---
+title: "KSPZV1 Complex Heatmaps Δ (postvax/baseline) Revision"
+author: "Tuan M. Tran"
+date: "05/05/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objective
+
+The following code generates the unsupervised hierarchical clustering heatmap for the KSPZV1 dataset using the ComplexHeatmap package. Clustering analysis is performed to test for statistical differences between Sample Clusters (SC) for outcomes as well as relevant variables (specifically SC2 and SC1,3,4). In addition, row clustering generates Gene Clusters (GC), and GSEA using blood transcription modules is then applied to genes within GC4 ranked by variance.
+
+Final options for delta:
+allgroups
+filter pre-seqmonk < 7.5M
+MADS = 25%
+clustering: ward.D2 and euclidean, 4 clusters for columns, 5 clusters for genes
+
+This script reproduces Figures 4B, S5A, 4D in the revised manuscript. It includes the following changes:
+
+1. Add study site (Wagai vs Siaya) to column annotations
+
+```{r load libraries, include = TRUE, message=FALSE, warning=FALSE}
+library(ComplexHeatmap)
+library(miscTools)
+library(edgeR)
+library(Biobase)
+library(tidyverse)
+library(googledrive)
+library(data.table)
+library(ggpubr)
+library(fgsea)
+library(devtools)
+library(knitr)
+figdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/"
+```
+
+
+```{r options, message=FALSE, warning=FALSE}
+myBatch <- "both" 
+myGroup <- "allGroups" 
+myTimepoint <- "delta" 
+ClusterCols <- TRUE
+col.hclust.method <- "ward.D2" 
+col.dist.method <- "euclidean" 
+row.hclust.method <- "ward.D2" 
+row.dist.method <- "euclidean" 
+PCT <- 25 
+filter.type <- paste("mads",PCT,"pct",sep="")
+noColClust <- 4
+noRowClust <- 5
+```
+
+## Load ExpressionSet
+
+```{r load cpm eset, message=FALSE, warning=FALSE}
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("17xx0YaggLiyWdJc9rqA1nkPSE7dj05p0"), path = temp, overwrite = TRUE)
+x <- readRDS(file = dl$local_path)
+x$treat <- factor(x$treat, levels = c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+```
+
+## Add additional baseline data
+
+```{r add additional baseline data, message=FALSE, warning=FALSE}
+#CBC data
+temp <- tempfile(fileext = ".xlsx")
+dl <- drive_download(
+  as_id("1df0pHJAlFteRIcQuJql3U2IZFe5SpZdB"), path = temp, overwrite = TRUE)
+CBCdat <- readxl::read_excel(dl$local_path) %>%
+  mutate(DaysPriorVax1 = as.integer(gsub(" \\(Dose 1\\)", "", .$`Days Post Vaccination`))*-1,
+         Hemoglobin = as.numeric(Hemoglobin)) %>%
+  dplyr::select(PATID, DaysPriorVax1, Hemoglobin, Platelets, WBC, Neutrophils, Percent.Neutrophils)
+pData(x) <- pData(x) %>%
+  left_join(., CBCdat, by = "PATID")
+
+## weight data
+temp <- tempfile(fileext = ".csv")
+dl <- drive_download(
+  as_id("1hvjTuBKWIYKmDrOdiogGqcHPJUUPZM4P"), path = temp, overwrite = TRUE)
+WeightDat <- read_csv(dl$local_path) %>%
+  dplyr::select(PATID, zwei, zwfl, zbmi) #for definitions: https://cran.r-project.org/web/packages/anthro/anthro.pdf
+pData(x) <- pData(x) %>%
+  left_join(., WeightDat, by = "PATID") 
+
+#add pre-vax cluster information
+temp <- tempfile(fileext = ".csv")
+dl <- drive_download(
+  as_id("1LtD4PeZZ34dCnghGBikY9wTs9CtsebKo"), path = temp, overwrite = TRUE)
+pData(x) <- read_csv(dl$local_path) %>%
+  dplyr::select(PATID, Cluster) %>%
+  dplyr::rename(PrevaxCluster = Cluster) %>%
+  left_join(pData(x), ., by = "PATID")
+rownames(pData(x)) <- pData(x)$PATID
+all.pDat <- pData(x)
+```
+
+##Filtering features
+
+```{r filter by mads, message=FALSE, warning=FALSE}
+dim(x)
+if(PCT < 100){
+  madsno <- as.integer(nrow(x)*(PCT/100))
+  mads <- apply(exprs(x), 1, mad)  #mad filtering
+  x <- x[mads>sort(mads, decr=TRUE)[madsno],]
+}
+dim(x)
+```
+
+## Make annotation dataframe and then build heatmap annotation object using HeatMapAnnotation function
+
+For details on how to make annotations, refer to:
+https://jokergoo.github.io/ComplexHeatmap-reference/book/
+
+```{r build annotations, message=FALSE, warning=FALSE}
+#full
+annot.df <- as.data.frame(cbind(
+  "Site" = as.character(x$site),
+  "Gender" = as.character(factor(x$SEX, levels = c("M","F"), labels = c("male","female"))),
+  "Age" = as.character(x$age.vax1),
+  "Pf at first vax" = as.character(factor(x$mal.vax.1, levels = c(0,1), labels = c("neg","pos"))),
+  "# Pf episodes during vax" = as.character(x$mal.dvax.tot),
+  "CSP IgG pre-vax" = as.character(log10(x$pfcsp_pre+1)),
+  "CSP IgG response (log2 fold change)" = as.character(x$log2FC_CSPAb),
+  "Days to first parasitemia post-vax" = as.character(x$tte.mal.atp.6),
+  "Outcome" = as.character(factor(x$mal.atp.3, levels = c(0,1), labels = c("protected","unprotected"))),
+  "Dose" = as.character(x$treat)
+  ))
+annot.df <- rev(annot.df)
+for(i in c(1:ncol(annot.df))){
+  annot.df[,i] <- as.character(annot.df[,i])
+  }
+annot.df$Age <- as.numeric(annot.df$Age)
+annot.df$`Days to first parasitemia post-vax` <- as.numeric(annot.df$`Days to first parasitemia post-vax`)
+annot.df$`# Pf episodes during vax` <- as.numeric(annot.df$`# Pf episodes during vax`)
+annot.df$`CSP IgG response (log2 fold change)` <- as.numeric(annot.df$`CSP IgG response (log2 fold change)`)
+annot.df$`CSP IgG pre-vax` <- as.numeric(annot.df$`CSP IgG pre-vax`)
+rownames(annot.df) <- colnames(x)
+clab <- list(
+  "Site" = c("Wagai" = "#B2DF8A", "Siaya" = "#33A02C"),
+  "Gender" = c("male" = "#E5E5E5", "female" = "#191919"),
+  "Age" = circlize::colorRamp2(c(min(all.pDat$age.vax1, na.rm=T), max(all.pDat$age.vax1, na.rm=T)), c("#E5E5E5", "#333333")),
+  "Pf at first vax" = c("neg" = "#D1D3D3", "pos" = "#b2182b"),
+  "# Pf episodes during vax" = circlize::colorRamp2(c(min(all.pDat$mal.dvax.tot, na.rm=T), max(all.pDat$mal.dvax.tot, na.rm=T)),
+                                                    c("#fee5d9", "#a50f15")),
+  "CSP IgG pre-vax" = circlize::colorRamp2(c(min(log10(all.pDat$pfcsp_pre+1), na.rm=T), max(log10(all.pDat$pfcsp_pre+1), na.rm=T)), c("#f2f0f7", "#54278f")),
+  "CSP IgG response (log2 fold change)" = circlize::colorRamp2(c(-max(abs(all.pDat$log2FC_CSPAb), na.rm=T), 0, max(abs(all.pDat$log2FC_CSPAb), na.rm=T)), c("#656566", "white", "#54278f")),
+  "Days to first parasitemia post-vax" = circlize::colorRamp2(c(min(all.pDat$tte.mal.atp.6, na.rm=T), max(all.pDat$tte.mal.atp.6, na.rm=T)), c("#d4defc", "#112663")),
+  "Outcome" = c("protected" = "#1F78B4", "unprotected" = "#A6CEE3"),
+  "Dose" = c("Placebo" = "#808080", "4.5 x 10^5 PfSPZ" = "#fdcc8a", "9.0 x 10^5 PfSPZ" = "#fc8d59", "1.8 x 10^6 PfSPZ" = "#d7301f")
+  )
+clab <- rev(clab)
+ha <- HeatmapAnnotation(df = annot.df, col = clab, na_col = "lavender", annotation_name_gp = gpar(fontsize = 7),
+                        simple_anno_size = unit(0.08, "inches"), #this adjusts the height of the column annotations
+                        annotation_name_side = "left")
+```
+
+## Scaling
+
+```{r scale expression data,message=FALSE, warning=FALSE}
+colnames(x) <- colnames(exprs(x))
+unscaled_logCPM <- x
+ScaleData <- FALSE
+if(myTimepoint == "delta"){
+  myScaleData <- "logFC"
+  myHeatlegend.title <- "log2 fold-change over pre-vax"
+}
+```
+
+## Determining optimal number of clusters using fviz_nbclust function
+
+https://www.datanovia.com/en/lessons/determining-the-optimal-number-of-clusters-3-must-know-methods/
+
+https://uc-r.github.io/kmeans_clustering#optimal
+
+To perform a cluster analysis in R, generally, the data should be prepared as follows:
+
+Rows are observations (individuals) and columns are variables
+Any missing value in the data must be removed or estimated.
+The data must be standardized (i.e., scaled) to make variables comparable. Recall that, standardization consists of transforming the variables such that they have mean zero and standard deviation one.1
+
+```{r optimal clusters Elbow, echo=FALSE, eval=FALSE,message=FALSE, warning=FALSE}
+library(factoextra)
+# Elbow method
+fviz_nbclust(t(exprs(x)), cluster::pam, method = "wss") +
+    geom_vline(xintercept = 4, linetype = 2)+
+  labs(subtitle = "Elbow method")
+```
+
+## Clustering and Distance options
+
+This chunk takes a while if you run the full gene set so be patient.
+
+```{r set clustering and distance options, message=FALSE, warning=FALSE}
+#https://jokergoo.github.io/ComplexHeatmap-reference/book/a-single-heatmap.html
+#See options for variables
+hclust.col <- cutree(stats::hclust(dist(t(exprs(x)), method = col.dist.method), method = col.hclust.method), k = noColClust)
+hclust.row <- cutree(stats::hclust(dist(exprs(x), method = row.dist.method), method = row.hclust.method), k = noRowClust)
+```
+
+## Build heatmap object
+
+```{r build heatmap, message=FALSE, warning=FALSE}
+set.seed(12345)
+x$treat <- droplevels(x$treat)
+x$dummytreatlevels <- factor(x$treat, levels = c("Placebo",
+                                                   "4.5 x 10^5 PfSPZ",
+                                                   "9.0 x 10^5 PfSPZ",
+                                                   "1.8 x 10^6 PfSPZ"),
+                               labels = c(1,2,3,4))
+hm <- Heatmap(exprs(x),
+              name = "mat",
+              column_title = "subjects",
+              column_title_side = "bottom",
+              show_row_dend = FALSE,
+              row_title = paste(filter.type, nrow(x), "genes"),
+              row_title_side = "left",
+              row_names_side = "left",
+              row_names_gp = gpar(fontsize = 8),
+              row_names_max_width = unit(9, "cm"),
+              cluster_columns = TRUE,
+              cluster_rows = TRUE,
+              column_split = paste(x$dummytreatlevels, hclust.col, sep = "_"),
+              row_split = paste("gene cluster ",hclust.row, sep = "_"),
+              show_row_names = FALSE,
+              top_annotation = ha,
+              heatmap_legend_param = list(title = myHeatlegend.title, color_bar = "continuous", legend_direction = "horizontal"),
+              show_column_names=FALSE,
+              cluster_column_slices = FALSE,
+              cluster_row_slices = FALSE,
+              height = unit(3, "inches"),
+              width = unit(10, "inches")
+              )
+```
+
+## Print heatmap (Figure 4B in pre-print)
+
+```{r save heatmap, fig.width= 10, fig.height=7, fig.align="center", eval=FALSE}
+#set dimensions
+myheight <- 10
+mywidth <- 20
+cairo_pdf(paste0(figdir, "Fig 4B Revised Heatmap", " height", myheight, " width", mywidth, ".pdf"), height = myheight, width = mywidth)
+print(hm)
+dev.off()
+```
+
+## Extract clustering information
+
+see https://github.com/jokergoo/ComplexHeatmap/issues/136
+
+Note: may have to run this chunk directly in console if you get the following error:
+      Error: The width or height of the raster image is zero, maybe you forget to turn off the previous graphic device or it was corrupted. Run `dev.off()` to close it.
+
+```{r extract clustering information columns, message=FALSE, warning=FALSE, fig.width= 16, fig.height=8, fig.align='center'}
+hm <- draw(hm)
+```
+
+```{r extract clustering information columns 2, message=FALSE, warning=FALSE}
+c.dend <- column_dend(hm)  #Extract col dendrogram
+ccl.list <- column_order(hm)  #Extract clusters (output is a list)
+#lapply(ccl.list, function(x) length(x))  #check/confirm size clusters
+
+#loop to extract samples for each cluster.
+for (i in 1:length(column_order(hm))){
+  if (i == 1) {
+    clu <- t(t(colnames(exprs(x)[,column_order(hm)[[i]], drop = FALSE]))) #one cluster had a single column, so have to add drop = FALSE argument to prevent the matrix from becoming a vector
+    out <- cbind(clu, paste("cluster", i, sep=""))
+    colnames(out) <- c("SampleID", "Cluster")
+    } else {
+      clu <- t(t(colnames(exprs(x)[,column_order(hm)[[i]], drop = FALSE])))
+      clu <- cbind(clu, paste("cluster", i, sep=""))
+      out <- rbind(out, clu)
+    }
+}
+
+## Merge with pData(x)
+pData.cluster <- pData(x) %>%
+  rownames_to_column(var = "SampleID") %>%
+  left_join(., as_tibble(out), by = "SampleID") %>%
+  column_to_rownames(var = "SampleID") %>%
+  mutate(Cluster = gsub("cluster", "SC", .$Cluster)) %>%
+  mutate(Cluster.pam4.cl16 = Cluster) %>%
+  mutate(Cluster = gsub("6", "2", .$Cluster)) %>%
+  mutate(Cluster = gsub("10", "2", .$Cluster)) %>%
+  mutate(Cluster = gsub("14", "2", .$Cluster)) %>%
+  mutate(Cluster = ifelse(.$Cluster != "SC2", "SC1,3,4", .$Cluster)) %>%
+  filter(Cluster == "SC2" | Cluster == "SC1,3,4")
+
+#sanity checks
+table(pData.cluster$Cluster,pData.cluster$treat)
+table(pData.cluster$Cluster.pam4.cl16,pData.cluster$treat)
+```
+
+## Plot stats based on clusters
+
+```{r make stats plots based on clusters, message=FALSE, warning=FALSE}
+basefont <- "sans"
+basefontsize <- 9
+pvalfontsize <- 7
+mySignifLabel <- "p.signif"
+symnum.args <- list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 0.1, 1), symbols = c("****", "***", "**", "*", "trend",""))
+
+#OUTCOME
+foo1 <- c(1,2,3,4)  
+names(foo1) <-  names(summary(pData.cluster$treat))
+for(i in names(summary(pData.cluster$treat))){
+  pData.cluster.temp <- pData.cluster %>%
+    filter(treat == i)
+  foo1[i] <- signif(fisher.test(table("Cluster" = pData.cluster.temp$Cluster, "Outcome" = pData.cluster.temp$mal.atp.3))$p.value,2)
+  foo1[i] <- ifelse(foo1[i] >= 0.05, "",
+                    ifelse(foo1[i] >= 0.01 & foo1[i] < 0.05, "*",
+                           ifelse(foo1[i] >= 0.001 & foo1[i] < 0.01, "**",
+                                  ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
+  }
+dat_text <- data.frame(treat = factor(levels(pData.cluster$treat),
+                                      levels = levels(pData.cluster$treat)),
+                       label = foo1, Cluster = levels(factor(pData.cluster.temp$Cluster)), x = 1.5, y = 25,
+                       Outcome = c("not protected (infected)", "protected (uninfected)"))
+
+Outcome.counts <- pData.cluster %>%
+  mutate(Cluster = factor(Cluster)) %>%
+  mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)"))) %>%
+  ggplot(., aes(x=Cluster, fill = Outcome)) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
+  ylab("Outcome (count)") +
+  facet_wrap(.~treat, ncol = 4) +
+  theme_classic(base_family = basefont, base_size = basefontsize) +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        strip.background = element_rect(fill="white"),
+        legend.position="none"
+        ) +
+  geom_text(
+    data = dat_text,
+    mapping = aes(x = x, y = y, label = label))
+
+#Days to first parasitemia
+TTE.boxplot <- pData.cluster %>%
+  mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)"))) %>%
+  ggplot(., aes(Cluster, tte.mal.atp.6, fill = Outcome, color = Outcome)) +
+  geom_point(position = position_jitterdodge()) +
+  geom_boxplot(alpha = 0.4, color = "grey30", outlier.shape = NA) +
+  stat_compare_means(aes(group = Outcome), label = "p.signif",
+                     method = "wilcox.test", label.x.npc = "center", vjust = 1, symnum.args = symnum.args) +
+  scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
+  scale_color_manual(values = c("#A6CEE3", "#1F78B4")) +
+  ylab("Days to first parasitemia") +
+  ylim(c(0,180)) +
+  facet_wrap(~treat, ncol = 4) +
+  theme_classic(base_family = basefont, base_size = basefontsize) +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        strip.background = element_rect(fill="white"),
+        legend.position="none"
+        )
+
+#CSP-specific IgG at pre-vax
+CSPbl.boxplot <- pData.cluster %>%
+  mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)"))) %>%
+  dplyr::filter(!(is.na(pfcsp_pre) | is.na(Outcome))) %>% 
+  ggplot(., aes(Cluster, log10(pfcsp_pre+1), fill = Outcome, color = Outcome)) +
+  geom_point(position = position_jitterdodge()) +
+  geom_boxplot(alpha = 0.4, color = "grey30", outlier.shape = NA) +
+     stat_compare_means(aes(group = Outcome), label = "p.signif",
+                        method = "wilcox.test", label.x.npc = "center", vjust = 1, symnum.args = symnum.args) +
+  scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
+  scale_color_manual(values = c("#A6CEE3", "#1F78B4")) +
+  ylab("CSP-specific IgG at pre-vax") +
+  facet_wrap(~treat, ncol = 4) +
+  theme_classic(base_family = basefont, base_size = basefontsize) +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        strip.text.x = element_blank(),
+        strip.background = element_blank(),
+        legend.position="none"
+        )
+
+#CSP-specific IgG log2FC
+CSPlogfc.boxplot <- pData.cluster %>%
+  mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)"))) %>%
+  dplyr::filter(!(is.na(log2FC_CSPAb) | is.na(Outcome))) %>% 
+  ggplot(., aes(x = Cluster, y = log2FC_CSPAb, fill = Outcome, color = Outcome)) +
+  geom_point(position = position_jitterdodge()) +
+  geom_boxplot(alpha = 0.4, color = "grey30", outlier.shape = NA) +
+  stat_compare_means(aes(group = Outcome), label = "p.signif",
+                     method = "wilcox.test", label.x.npc = "center", vjust = 1, symnum.args = symnum.args) +
+  scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
+  scale_color_manual(values = c("#A6CEE3", "#1F78B4")) +
+  ylab("CSP-specific IgG (log fold change)") +
+  ylim(c(-12.5,25)) +
+  facet_wrap(~treat, ncol = 4) +
+  theme_classic(base_family = basefont, base_size = basefontsize) +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        strip.text.x = element_blank(),
+        strip.background = element_blank(),
+        legend.position="none"
+        )
+
+#Pf at first vax
+foo1 <- c(1,2,3,4)  
+names(foo1) <-  names(summary(pData.cluster$treat))
+pData.cluster <- pData.cluster %>%
+  mutate(Cluster = factor(Cluster)) %>%
+  mutate(Pf = factor(mal.vax.1, levels = c(1,0), labels = c("pos", "neg")))
+for(i in names(summary(pData.cluster$treat))){
+  pData.cluster.temp <- pData.cluster %>%
+    filter(treat == i)
+  foo1[i] <- signif(fisher.test(table("Cluster" = pData.cluster.temp$Cluster, "Pf at Vax1" = pData.cluster.temp$Pf))$p.value,2)
+  foo1[i] <- ifelse(foo1[i] >= 0.05, "",
+                    ifelse(foo1[i] >= 0.01 & foo1[i] < 0.05, "*",
+                           ifelse(foo1[i] >= 0.001 & foo1[i] < 0.01, "**",
+                                  ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
+  }
+
+dat_text <- data.frame(treat = factor(levels(pData.cluster$treat), levels = levels(pData.cluster$treat)), label = foo1, Cluster = levels(factor(pData.cluster.temp$Cluster)),
+                           x = 1.5, y = 45,
+                           Pf = c("pos","neg"))              
+
+Pf.counts <-  pData.cluster %>%
+  ggplot(., aes(x=Cluster, fill = Pf)) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("#b2182b", "#D1D3D3")) +
+  ylab("Pf at first vax (counts)") +
+  facet_wrap(~treat, ncol = 4) +
+  theme_classic(base_family = basefont, base_size = basefontsize) +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        strip.text.x = element_blank(),
+        strip.background = element_blank(),
+        legend.position="none"
+        ) +
+  geom_text(data = dat_text,mapping = aes(x = x, y = y, label = label))
+
+#Pf episodes during vax period
+mal.dvax.tot.boxplot <- pData.cluster %>%
+  mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)"))) %>%
+  ggplot(., aes(Cluster, mal.dvax.tot, fill = Outcome, color = Outcome)) +
+  geom_point(position = position_jitterdodge()) +
+  geom_boxplot(alpha = 0.4, color = "grey30", outlier.shape = NA) +
+  stat_compare_means(aes(group = Outcome), label = "p.signif",
+                     method = "wilcox.test", label.x.npc = "center", vjust = 1, symnum.args = symnum.args) +
+  scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
+  scale_color_manual(values = c("#A6CEE3", "#1F78B4")) +
+  ylab("# Pf episodes during vax") +
+  ylim(c(0,6.5)) +
+  facet_wrap(~treat, ncol = 4) +
+  theme_classic(base_family = basefont, base_size = basefontsize) +
+  theme(axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        strip.text.x = element_blank(),
+        strip.background = element_blank(),
+        legend.position="none"
+        )
+
+foo1 <- c(1,2,3,4)  
+names(foo1) <-  names(summary(pData.cluster$treat))
+pData.cluster <- pData.cluster %>%
+  mutate(Site = factor(site))
+for(i in names(summary(pData.cluster$treat))){
+  pData.cluster.temp <- pData.cluster %>%
+    filter(treat == i)
+  foo1[i] <- signif(fisher.test(table("Cluster" = pData.cluster.temp$Cluster, "Site" = pData.cluster.temp$Site))$p.value,2)
+  foo1[i] <- ifelse(foo1[i] >= 0.05, "",
+                    ifelse(foo1[i] >= 0.01 & foo1[i] < 0.05, "*",
+                           ifelse(foo1[i] >= 0.001 & foo1[i] < 0.01, "**",
+                                  ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
+  }
+
+dat_text <- data.frame(treat = factor(levels(pData.cluster$treat), levels = levels(pData.cluster$treat)), label = foo1, Cluster = levels(factor(pData.cluster.temp$Cluster)),
+                           x = 1.5, y = 25,
+                           Site = c("Siaya","Wagai"))      
+
+  Site.counts <- pData.cluster %>%
+    dplyr::filter(!(is.na(Cluster) | is.na(Site))) %>% 
+    ggplot(., aes(x= Cluster, fill = Site)) +
+    geom_bar(position = "dodge") +
+    scale_fill_manual(values = c("#33A02C","#B2DF8A")) +
+    ylab("Site (counts)") +
+    facet_wrap(~treat, ncol = 4) +
+    theme_classic(base_family = basefont, base_size = basefontsize) +
+  theme(axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        strip.text.x = element_blank(),
+        strip.background = element_blank(),
+        legend.position="none"
+        ) +
+  geom_text(data = dat_text,mapping = aes(x = x, y = y, label = label, size = basefontsize))
+```
+
+## Print column annotation bar and box plots (Figure S2 in pre-print)
+
+```{r plot plots based on clusters, message=FALSE, warning=FALSE, fig.width=14, fig.height=12, fig.align='center'}
+print(ggarrange(
+  Outcome.counts,
+  TTE.boxplot,
+  CSPbl.boxplot,
+  CSPlogfc.boxplot,
+  Pf.counts,
+  mal.dvax.tot.boxplot,
+  Site.counts,
+  ncol = 2,
+  nrow = 4)
+)
+```
+
+
+
+```{r plot plots based on clusters ggsave, eval=FALSE, echo=FALSE}
+# cairo_pdf(filename = paste0(figdir, "Fig S5A Revision.pdf"), height = 7, width = 8)
+# print(ggarrange(
+#   Outcome.counts,
+#   TTE.boxplot,
+#   CSPbl.boxplot,
+#   CSPlogfc.boxplot,
+#   Pf.counts,
+#   mal.dvax.tot.boxplot,
+#   Site.counts,
+#   labels = "AUTO",
+#   ncol = 2,
+#   nrow = 4)
+#   )
+# dev.off()
+```
+
+
+### Extract clustering information for rows (genes)
+
+```{r extract clustering information rows, message=FALSE, warning=FALSE}
+r.dend <- row_dend(hm)  #Extract col dendrogram
+rcl.list <- row_order(hm)  #Extract clusters (output is a list)
+lapply(rcl.list, function(x) length(x))  #check/confirm size clusters
+
+# loop to extract samples for each cluster.
+
+for (i in 1:length(row_order(hm))){
+  if (i == 1) {
+    clu <- t(t(rownames(exprs(x)[row_order(hm)[[i]],])))
+    out <- cbind(clu, paste("cluster", i, sep=""))
+    colnames(out) <- c("GeneID", "Cluster")
+    } else {
+      clu <- t(t(rownames(exprs(x)[row_order(hm)[[i]],])))
+      clu <- cbind(clu, paste("cluster", i, sep=""))
+      out <- rbind(out, clu)
+    }
+  }
+```
+
+### Merge with fData(x)
+
+```{r merge with fData,message=FALSE, warning=FALSE}
+if(myGroup == "allGroups"){
+  if(myTimepoint == "delta"){
+    if(noRowClust == 5){
+      fData.cluster <- fData(x) %>%
+        dplyr::rename(GeneID = EnsemblID) %>%
+        left_join(., as_tibble(out), by = "GeneID") %>%
+        column_to_rownames(var = "GeneID") %>%
+        mutate(Cluster = gsub("cluster", "GC", .$Cluster))
+      }
+    setdiff(rownames(x), rownames(fData.cluster))
+    setdiff(rownames(fData.cluster), rownames(x))
+    #Calculate average of means and average of variances of genes in each cluster
+     foo <- fData.cluster %>%
+      dplyr::select(GeneSymbol, Cluster) %>%
+      left_join(., exprs(x) %>%
+                  as.data.frame() %>%
+                  rownames_to_column(var = "EnsemblID") %>%
+                  left_join((fData(x) %>%
+                               dplyr::select(EnsemblID, GeneSymbol)),.,
+                            by = "EnsemblID"),
+                by = "GeneSymbol") %>%
+      pivot_longer(., cols = 4:ncol(.), names_to = "PATID", values_to = "log2FC expression") %>%
+      dplyr::group_by(GeneSymbol, EnsemblID,Cluster) %>%
+      summarise(mean = mean(`log2FC expression`), median = median(`log2FC expression`), variance = var(`log2FC expression`)) %>%
+      ungroup() %>%
+      group_by(Cluster) %>%
+      summarise(n_of_genes = n(), mean_of_variances = mean(variance))
+    #Calculate average expression by rowMeans as a ranking metric (most induced) in pData CL2 and fData CL4
+    cl24 <- fData.cluster %>%
+      filter(Cluster == "GC4") %>% #filter on gene cluster 4, which is the the most variable cluster
+      dplyr::select(GeneSymbol, Cluster) %>%
+      left_join(., exprs(x) %>%
+                  as.data.frame() %>%
+                  rownames_to_column(var = "EnsemblID") %>%
+                  left_join((fData(x) %>%
+                               dplyr::select(EnsemblID, GeneSymbol)),.,
+                            by = "EnsemblID"),
+                by = "GeneSymbol") %>%
+      filter(EnsemblID != "ENSG00000249428") %>% #remove duplicate CFAP99 transcript ENSG00000249428 that is no longer in database
+      pivot_longer(cols = 4:ncol(.), names_to = "PATID", values_to = "deltaCPM") %>%
+      dplyr::rename(GeneCluster = "Cluster") %>%
+      right_join(., pData.cluster %>%
+                   dplyr::select(PATID, treat, Cluster) %>%
+                   dplyr::rename(SampleCluster = "Cluster"), 
+                 by = "PATID") %>%
+      group_by(GeneSymbol, EnsemblID) %>%
+      summarise(n_of_samples = n(), mean_deltaCPM = mean(deltaCPM), median_deltaCPM = median(deltaCPM),
+                          stdev_deltaCPM = sd(deltaCPM), var_deltaCPM = var(deltaCPM)) %>%
+                mutate(newRankMetric = var_deltaCPM) %>% #used mean of variances for manuscript
+                arrange(desc(newRankMetric))
+    cl24.ranklist <- data.frame(GeneSymbol = cl24$GeneSymbol, newRankMetric = cl24$newRankMetric) %>%
+      arrange(desc(newRankMetric))
+          }
+}
+```
+
+```{r figure 4C preprint, echo=FALSE}
+knitr::kable(foo)
+```
+
+## Apply GSEA to Genes within Cluster ranked by mean variance across all samples 
+
+```{r apply fgsea, message=FALSE, warning=FALSE, fig.width = 12, fig.heigth = 12}
+set.seed(23)
+ranks <- deframe(cl24.ranklist)
+devtools::source_url("https://github.com/TranLab/ModuleLists/blob/main/NamedGeneRankList2GseaTable.R?raw=TRUE")
+GSEA_delta_bound_df <- NamedGeneRankList2GseaTable(rankedgenes = ranks, geneset = "bloodmodules", output_directory = tempdir(), filename_prefix = paste0("PfSPZ_GSEA_", myTimepoint,
+"_GeneCluster4_minSize5"), scoreType = "pos", minSize = 5, fixed_seed = TRUE)
+```
+
+### Make GSEA plot for Figure 4D of pre-print
+
+GSEA of genes within the most variable cluster GC4 ranked by mean variance across all samples (minimum
+gene set size = 5, only modules with BH-adjusted p<0.20 shown)
+
+```{r GSEA plot for baseline CPM Figure Panel D, message=FALSE, warning=FALSE}
+myGSEAClusterPlotDat <- readxl::read_excel(paste0(tempdir(),
+                                                  "PfSPZ_GSEA_", myTimepoint,"_GeneCluster4_minSize5",
+                                                  " GSEA results bloodmodules.xlsx")) %>%
+  filter(padj < 0.20) %>%
+  mutate(neglogpadj = -log10(padj)) %>%
+  mutate(pathway = gsub("VS", "v", pathway)) %>%
+  mutate(pathway = gsub("Vd", "Vδ", pathway)) %>%
+  mutate(pathway = gsub("gd", "γδ", pathway)) %>%
+  mutate(pathway = sub(".*?\\_", "", pathway)) %>%
+  dplyr::filter(!grepl("NEURON", pathway)) %>%
+  mutate(pathway = fct_reorder(pathway, desc(NES))) %>%
+  mutate(TextLabelColor = ifelse(module_type == "lowBTMs", scales::muted("red"),
+                                 ifelse(module_type == "highBTMs", scales::muted("blue"),
+                                        ifelse(module_type == "MonacoModules", "black","gray")))) %>%
+  arrange(desc(NES)) 
+myGSEAClusterPlot <- myGSEAClusterPlotDat %>% 
+  ggplot(., aes(x = NES, y = pathway, fill = neglogpadj)) +
+  geom_bar(stat = 'identity') + 
+  viridis::scale_fill_viridis(option= "A", begin = 0.25, end = 0.75, alpha = 0.8, direction = -1, name = "-logadjP") +
+  theme_classic(base_family = "sans", base_size = 14) +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5,
+                                   colour = myGSEAClusterPlotDat$TextLabelColor),
+        legend.position = "bottom") +
+  coord_flip()
+```
+
+```{r plot GSEA enrichment delta, message=FALSE, warning=FALSE, fig.width=5, fig.height=5, fig.align='center'}
+addSmallLegend <- function(myPlot, pointSize = 4, textSize = 6, spaceLegend = 1) {
+    myPlot +
+        guides(shape = guide_legend(override.aes = list(size = pointSize)),
+               color = guide_legend(override.aes = list(size = pointSize))) +
+        theme(legend.title = element_text(size = textSize), 
+              legend.text  = element_text(size = textSize),
+              legend.key.size = unit(spaceLegend, "lines"))
+}
+addSmallLegend(myGSEAClusterPlot)
+```

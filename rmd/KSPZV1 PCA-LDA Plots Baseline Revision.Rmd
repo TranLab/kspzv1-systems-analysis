@@ -1,0 +1,387 @@
+---
+title: "KSPZV1 PCA-LDA Baseline Plots"
+author: "Aditi Upadhye"
+date: "5/9/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(MASS)
+library(googledrive)
+library(ggord)
+library(pcaExplorer)
+figdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Revised Figure Panels/"
+```
+
+## Objective
+
+PCA-LDA for baseline
+
+```{r download file, echo=TRUE, message=FALSE, warning=FALSE}
+  temp <- tempfile(fileext = ".rds")
+  dl <- drive_download(
+  as_id("1-Jx3_ZZk4Ygi46a8dCYumK2IzBtMWE-4"), path = temp, overwrite = TRUE)
+   eset <- readRDS(dl$local_path)
+```
+
+## Reduce by groups
+
+Reduce if needed, clean, wrangle
+
+```{r reduce groups, echo=TRUE}
+myGroups <- c("Placebo","4.5 x 10^5 PfSPZ","9.0 x 10^5 PfSPZ","1.8 x 10^6 PfSPZ")
+eset <- eset[,eset$treat %in% myGroups ]
+eset$Outcome <- factor(ifelse(eset$mal.atp.3 == 0 , "P","NP"), levels = c("P","NP"))
+eset$Class <- paste0(eset$treat,"_",eset$Outcome)
+fData(eset) <- fData(eset) %>%
+  as.data.frame() %>%
+  remove_rownames()
+rownames(fData(eset)) <- make.names(fData(eset)$GeneSymbol, unique = TRUE)
+rownames(eset) <- rownames(fData(eset))
+colnames(eset) <- pData(eset)$PATID
+```
+
+## PCA
+
+### Scree plot
+
+```{r prepare PCA and scree, echo=TRUE, fig.align='center'}
+pca <- prcomp(t(exprs(eset)),
+              center = TRUE,
+              scale. = TRUE, rank. = 120)
+
+## plot scree plot to determine proportion variation of principle components
+proportion.variance <- summary(pca)
+scree_plot <- pcaExplorer::pcascree(pca,pc_nr = 120, type = "cev")
+scree_plot
+```
+
+### PCA Plot
+
+```{r preprare data for plot, echo=TRUE, fig.align='center'}
+pheno <- pData(eset)
+pheno <- pheno %>%
+  droplevels()
+```
+
+```{r option adding non-transcriptomic features, echo = FALSE, eval=FALSE}
+pheno$SEX <- ifelse(pheno$SEX == "F", 1, 0)
+pheno$site <- ifelse(pheno$site == "Siaya", 1, 0)
+pheno[is.na(pheno$mal.dvax.tot),]$mal.dvax.tot <- median(pheno$mal.dvax.tot, na.rm = TRUE) #impute one missing value with median
+pheno[is.na(pheno$pfcsp_pre),]$pfcsp_pre <- median(pheno$pfcsp_pre, na.rm = TRUE) #impute one missing value with median
+#cbind mal.dvax.total to pca$x
+if(all(rownames(pheno) == rownames(pca$x))){
+  pca$x <- cbind(as.matrix(pheno[c("mal.dvax.tot","pfcsp_pre", "age.vax1", "SEX", "site")]), pca$x)
+}
+```
+
+```{r model lda, echo=TRUE, fig.align='center'}
+model_lda <- lda(pca$x, grouping = pheno$Class)
+prop.lda = model_lda$svd^2/sum(model_lda$svd^2)
+plda <- predict(object = model_lda)
+dataset = data.frame(PATID = pheno[,"PATID"],
+                     Class = pheno[,"Class"],
+                     site = pheno[,"site"],
+                     treat = pheno[,"treat"],
+                     Age = pheno[,"age.vax1"],
+                     Outcome = pheno[,"Outcome"],
+                     Sex = pheno[,"SEX"],
+                     Seqbatch = pheno[,"SEQBATCH"],
+                     pfcsp_pre = pheno[,"pfcsp_pre"],
+                     month.vax1 = pheno[,"month.vax1"],
+                     mal.dvax = pheno[,"mal.dvax.tot"],
+                     pca = pca$x,
+                     lda = plda$x)
+
+# PCA plot
+prop.pca = pca$sdev^2/sum(pca$sdev^2)
+pca_plot <- ggplot(dataset) + geom_point(aes(pca.PC1, pca.PC2, colour = treat, shape = Outcome), size = 2.5) +
+  labs(x = paste("PC1 (", scales::percent(prop.pca[1]), ")", sep=""),
+       y = paste("PC2 (", scales::percent(prop.pca[2]), ")", sep=""))+
+  scale_color_manual(values=c("#808080","#fdcc8a","#fc8d59","#d7301f"))+
+  scale_fill_manual(values=c("#808080","#fdcc8a","#fc8d59","#d7301f")) +
+  theme_bw()
+pca_plot
+```
+
+## PCA-LDA
+
+Add LDA vectors to plot as separate geom. 
+
+
+```{r lda and top ld, echo =FALSE}
+# obs <- plda$x
+# vars <- model_lda$scaling
+# 
+# whichpc <- "LD1"
+# topN <- 1
+# sorted_LD1 <- sort(vars[, whichpc]) 
+# extreme_LD1 <- c(tail(sorted_LD1, topN), head(sorted_LD1, topN)) 
+# extreme_LD1 <- extreme_LD1 %>%
+#   as.data.frame() %>%
+#   rownames_to_column("PC")%>%
+#   rename("LD1"=".")
+# 
+# whichpc <- "LD2"
+# topN <- 1
+# sorted_LD2 <- sort(vars[, whichpc]) 
+# extreme_LD2 <- c(tail(sorted_LD2, topN), head(sorted_LD2, topN)) 
+# extreme_LD2 <- extreme_LD2 %>%
+#   as.data.frame() %>%
+#   rownames_to_column("PC")%>%
+#   rename("LD2"=".")
+# 
+# my_loadings <- c(extreme_LD1$PC,extreme_LD2$PC)
+```
+
+
+```{r lda and top ld hypotenuse, echo =TRUE}
+obs <- plda$x
+vars <- model_lda$scaling
+vars_hypotenuse <- vars[,c("LD1","LD2")] %>%
+  as.data.frame() %>%
+  rownames_to_column("PC") %>%
+  mutate(hypotenuse = sqrt(LD1^2+LD2^2)) %>%
+  mutate(direction = ifelse(LD1>0 & LD2>0, "pospos",
+                            ifelse(LD1>0 & LD2<0, "posneg",
+                                   ifelse(LD1<0 & LD2<0, "negneg","negpos")))) %>%
+  group_by(direction) %>%
+  dplyr::arrange(desc(hypotenuse)) %>%
+  slice(1) %>%
+  ungroup()
+  
+my_loadings <- vars_hypotenuse$PC
+```
+
+### Table of PCs that discriminate classes the most by quadrant (PC with max hypotenuse in each quadrant)
+
+```{r table of hypo, echo=FALSE}
+knitr::kable(vars_hypotenuse)
+```
+
+
+```{r add LDA, echo = TRUE, fig.align='center'}
+dat <- dataset %>% 
+  mutate(
+    one = plda$x[, 'LD1'], 
+    two = plda$x[, 'LD2'], 
+    newgrp = sample(c('a', 'b'), n(), replace = T)
+    )
+dat2 <- dataset %>% 
+  mutate(
+    one = plda$x[, 'LD2'], 
+    two = plda$x[, 'LD3'], 
+    newgrp = sample(c('a', 'b'), n(), replace = T)
+    )
+dat3 <- dataset %>% 
+  mutate(
+    one = plda$x[, 'LD1'], 
+    two = plda$x[, 'LD3'], 
+    newgrp = sample(c('a', 'b'), n(), replace = T)
+    )
+dat$treat <- factor(dat$treat,levels = c("Placebo","4.5 x 10^5 PfSPZ","9.0 x 10^5 PfSPZ","1.8 x 10^6 PfSPZ"))
+dat$Class <- factor(dat$Class,levels = c("Placebo_NP","Placebo_P","4.5 x 10^5 PfSPZ_NP","4.5 x 10^5 PfSPZ_P",
+ "9.0 x 10^5 PfSPZ_NP","9.0 x 10^5 PfSPZ_P","1.8 x 10^6 PfSPZ_NP","1.8 x 10^6 PfSPZ_P"))
+```
+
+## Figure 1B of revised manuscript
+
+```{r biplot with top/bottom principle components, echo =TRUE}
+
+x <- "LD1"
+y <- "LD2"
+
+data <- data.frame(obsnames=row.names(plda$x), plda$x)
+datapc <- data.frame(varnames=rownames(model_lda$scaling), model_lda$scaling)
+datapc <- datapc %>%
+              dplyr::select(varnames,LD1,LD2)%>%
+              filter(varnames %in% my_loadings)
+
+datapc <- transform(datapc,
+            v1 = 55 * get(x),
+            v2 = 55 * get(y)
+)
+    
+biplot <- ggord(model_lda, dat$Class,axes = c("1", "2"),obslab = FALSE, ptslab = FALSE, ellipse = TRUE, parse = FALSE,
+                  vec_lab = (''),veccol = 'transparent')
+biplot$layers[[1]] <- NULL
+biplot <- biplot +
+  geom_hline(yintercept = 0, color = "gray40") +
+  geom_vline(xintercept = 0, color = "gray40") +
+  geom_point(data = dat, aes(shape = Outcome, color = Class, fill = Class), size = 4)+
+  geom_segment(data=datapc, aes(x=0, y=0, xend=v1, yend=v2), arrow=arrow(length=unit(0.7,"cm")), alpha=1, color="black")+
+  geom_text(data=datapc, aes(x=v1, y=v2, label=varnames), size = 5, vjust=1,color="black",position=position_jitter(width=1,height=1))+
+  scale_shape_manual(values = c(21, 24)) +
+  scale_color_manual(values=c(rep("grey85",2), rep("black",6))) +
+  scale_fill_manual(values=c("#6e6e6e","#6e6e6e","#fdcc8a","#fdcc8a","#fc8d59","#fc8d59","#d7301f","#d7301f")) +
+  guides(fill = guide_legend(override.aes= list(shape = NA))) +
+  theme(legend.title = element_blank(),
+        axis.text = element_text(size = 12, family = "Arial"),
+        axis.title = element_text(size = 14, family = "Arial"))
+
+biplot
+```
+
+```{r save biplot, eval=FALSE, echo=FALSE}
+cairo_pdf(paste0(figdir,"Fig 1B PCA-LDA biplot baseline revision.pdf"), height = 6, width = 7)
+biplot
+dev.off()
+```
+
+```{r interpretation, eval=FALSE, echo=FALSE}
+pheno %>%
+  as_tibble() %>%
+  group_by(Class) %>%
+  summarize(n = n(), mean_mal = mean(mal.dvax.tot, na.rm =TRUE), median_mal = mean(mal.dvax.tot, na.rm =TRUE),
+            mean_age = mean(age.vax1), median_age = median(age.vax1)) %>%
+  arrange(mean_age)
+
+library(tidyverse)
+library(magrittr)
+
+pheno %>%
+  as_tibble() %>%
+  group_by(treat) %>%
+  summarise(age_ttest_t = t.test(age.vax1[Outcome=="NP"], age.vax1[Outcome=="P"])$statistic,
+            age_ttest_p = t.test(age.vax1[Outcome=="NP"], age.vax1[Outcome=="P"])$p.value)
+``` 
+
+```{r interpretation 2, eval=FALSE, echo=FALSE}
+pheno %>%
+  as_tibble() %>%
+  group_by(site) %>%
+  summarize(n = n(), mean_mal = mean(mal.dvax.tot, na.rm =TRUE), median_mal = mean(mal.dvax.tot, na.rm =TRUE)) %>%
+  arrange(mean_mal)
+
+pheno %>%
+  as_tibble() %>%
+  group_by(mal.vax.1) %>%
+  summarize(n = n(), mean_mal = mean(mal.dvax.tot, na.rm =TRUE), median_mal = mean(mal.dvax.tot, na.rm =TRUE)) %>%
+  arrange(mean_mal)
+
+table(pheno$Class, pheno$site)
+table(pheno$mal.atp.3, pheno$site)
+table(pheno$Class, pheno$site)
+``` 
+
+### Apply GSEA to genes in PCs ranked by loadings
+
+```{r apply gsea, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+library(devtools)
+source_url("https://raw.githubusercontent.com/TranLab/ModuleLists/main/NamedGeneRankList2GseaTable.R")
+resdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/PC LDA GSEA tables/"
+
+#PC116
+ranks <- pca$rotation %>%
+  as.data.frame() %>% #convert matrix to dataframe to allow subsequent data wrangling
+  rownames_to_column(var = "Gene") %>%
+  as_tibble() %>%
+  dplyr::select(c(Gene, PC116)) %>% #select only PC of interest
+  arrange(desc(PC116)) %>% #arrange in descending order
+  deframe() #deframe to create named vector
+PC116_GSEA <- NamedGeneRankList2GseaTable(rankedgenes = ranks, geneset = "bloodmodules", output_directory = resdir, filename_prefix = "PC116", minSize = 20, fixed_seed = TRUE)
+PC116_GSEA <- PC116_GSEA %>%
+  arrange(padj) %>%
+  mutate("-log10 BH-adj p value" = log10(padj)) %>%
+  mutate(PC = "PC116")
+
+#PC113
+ranks <- pca$rotation %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "Gene") %>%
+  as_tibble() %>%
+  dplyr::select(c(Gene, PC113)) %>%
+  arrange(desc(PC113)) %>%
+  deframe()
+PC113_GSEA <- NamedGeneRankList2GseaTable(rankedgenes = ranks, geneset = "bloodmodules", output_directory = resdir, filename_prefix = "PC113", minSize = 20, fixed_seed = TRUE)
+PC113_GSEA <- PC113_GSEA %>%
+  arrange(padj) %>%
+  mutate("-log10 BH-adj p value" = log10(padj)) %>%
+  mutate(PC = "PC113")
+
+#PC119
+ranks <- pca$rotation %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "Gene") %>%
+  as_tibble() %>%
+  dplyr::select(c(Gene, PC119)) %>%
+  arrange(desc(PC119)) %>%
+  deframe()
+PC119_GSEA <- NamedGeneRankList2GseaTable(rankedgenes = ranks, geneset = "bloodmodules", output_directory = resdir, filename_prefix = "PC119", minSize = 20, fixed_seed = TRUE)
+PC119_GSEA <- PC119_GSEA %>%
+  arrange(padj) %>%
+  mutate("-log10 BH-adj p value" = log10(padj)) %>%
+  mutate(PC = "PC119")
+
+#PC89
+ranks <- pca$rotation %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "Gene") %>%
+  as_tibble() %>%
+  dplyr::select(c(Gene, PC89)) %>%
+  arrange(desc(PC89)) %>%
+  deframe()
+PC89_GSEA <- NamedGeneRankList2GseaTable(rankedgenes = ranks, geneset = "bloodmodules", output_directory = resdir, filename_prefix = "PC89", minSize = 20, fixed_seed = TRUE)
+PC89_GSEA <- PC89_GSEA %>%
+  arrange(padj) %>%
+  mutate("-log10 BH-adj p value" = log10(padj)) %>%
+  mutate(PC = "PC89")
+```
+
+```{r bind and make heatmap, echo = TRUE, fig.align='center'}
+bind_PC_GSEA <- bind_rows(PC89_GSEA, PC113_GSEA, PC116_GSEA, PC119_GSEA) %>%
+  arrange(desc(pathway))
+
+# bind_PC_GSEA_wide <- bind_PC_GSEA %>%
+#   dplyr::select(c(pathway, PC, NES)) %>%
+#   pivot_wider(.,names_from = PC, values_from = NES)
+```
+
+## Make Heatmap (Figure 1C of revised manuscript)
+
+Only pathways/modules from low-level BTMs, high-level BTMs, and Monaco modules with |NES| > 1 and adjusted p value < 0.25 shown.
+
+```{r make heatmap, echo = TRUE, fig.align='center', fig.width=8, fig.height=3.25}
+library(hrbrthemes)
+textcol <- "grey40"
+pc_heatmap <- bind_PC_GSEA %>%
+  filter(module_type != "BloodGen3Module") %>%
+  filter(padj<0.25) %>%
+  filter(NES > 1 | NES < -1) %>%
+  droplevels() %>%
+  ggplot(., aes(x = fct_reorder(pathway, rev(NES)), y = PC )) +
+  geom_tile(aes(fill = NES), color = "white", size = 0.2) +
+  scale_fill_gradient2(low = "blue", mid = "white", high= "red", 
+                       midpoint =  0, na.value = "red") +
+  scale_x_discrete(expand = c(0,0)) +
+  theme_ipsum(base_family = "Arial", base_size = 10,) +
+  theme(legend.position="right", legend.direction="vertical",
+        legend.title=element_text(colour=textcol),
+        legend.margin=margin(grid::unit(0, "cm")),
+        legend.text=element_text(colour=textcol, size=7, face="bold"),
+        legend.key.height=grid::unit(0.25, "cm"),
+        legend.key.width=grid::unit(0.2, "cm"),
+        axis.text.x=element_text(size=7, colour=textcol, angle = 45, vjust = 1, hjust=1),
+        axis.text.y=element_text(vjust=0.2, colour=textcol),
+        axis.title = element_blank(),
+        axis.ticks=element_line(size=0.4),
+        plot.background=element_blank(),
+        panel.border=element_blank(),
+        panel.grid.major = element_blank(),
+        plot.margin=margin(0.7, 0.4, 0.1, 1.5, "cm")
+      )
+pc_heatmap
+```
+
+```{r save heatmap, echo=FALSE, eval=FALSE}
+cairo_pdf(filename = paste0(figdir, "Fig 1B PC heatmap.pdf"), width = 6.5, height = 2.8)
+pc_heatmap
+dev.off()
+```
+

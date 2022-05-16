@@ -1,7 +1,7 @@
 ---
 title: "KSPZV1 DGE pre-immunization baseline - revised"
 author: "Tuan M. Tran"
-date: "05/03/2022"
+date: "05/13/2022"
 output: html_document
 ---
 
@@ -25,6 +25,7 @@ Perform differential gene expression using edgeR on pre-immunization baseline wh
 Revised analysis includes adjustments for:
 
 1. Batch
+2. Sex
 2. Study site
 3. log10(CSP Ab + 1)
 4. parasitemia at VAX1 (closest to baseline)
@@ -94,6 +95,7 @@ for(i in names(ygroup)){
   Subject <- factor(xgroup[[i]]$PATID)
   Outcome <- factor(xgroup[[i]]$Outcome, levels = c(1,0), labels = c("NotProtected","Protected"))
   Timepoint <- factor(xgroup[[i]]$Timepoint, levels = c(0,25), labels = c("baseline","postvax"))
+  Sex <- factor(xgroup[[i]]$SEX)
   Batch <- factor(xgroup[[i]]$SEQBATCH, levels = c("Aug2019","Nov2019"))
   Site <- as.factor(xgroup[[i]]$site)
   CSPAb <- as.integer(xgroup[[i]]$CSPAb)
@@ -119,7 +121,7 @@ for(i in names(degtab)){
 ```
 
 ```{r save baseline data, echo=FALSE, eval=FALSE}
-# save(design, fit, degtab, file = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Revision R Objects/Baseline Model All Treatments Batch Site log10 CSPAb baseline Pf_VAX1 adj.RData")
+# save(design, fit, degtab, file = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Revision R Objects/Baseline Model All Treatments Batch Sex Site log10 CSPAb baseline Pf_VAX1 adj.RData")
 ```
 
 ### Examine top 15 DEGs (protected vs not protected)
@@ -220,7 +222,7 @@ plotDat <- GSEAtab %>%
   droplevels()
 
 #plotting options
-basetextsize <- 8  
+basetextsize <- 7.5  
 myfont <- "sans"
 bubble_max_size <- 6
 
@@ -291,40 +293,40 @@ print(BottomPlot)
 ```
 
 
-```{r save DEG tables, echo=FALSE, message=FALSE, warning=FALSE}
-# degtab_long <- bind_rows(degtab, .id = "treatment") %>%
-#   dplyr::select(treatment, GeneSymbol, EnsemblID, descripton_new, logFC,logCPM, F, PValue, FDR) %>%
-#   mutate(study = "KSPZV1", timepoint = "pre-immunization baseline adj batch, CSP Ab baseline, Pf VAX1, site", comparison = "protected (P) vs. not protected (NP) at 3 months") %>%
-#   dplyr::select(study, treatment, timepoint, comparison, GeneSymbol, EnsemblID, descripton_new, logFC,logCPM, F, PValue, FDR) %>%
-#   dplyr::rename(hgnc_symbol = GeneSymbol, ensembl_id = EnsemblID, description = descripton_new)
-# degtab_VRC <- readxl::read_excel("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Cell Submission October 2021/Supplementary Tables/Table S1 Prevax DEG Tables for KSPZV1 VRC312 VR314.xlsx") %>%
-#               dplyr::filter(study == "VRC312" | study == "VRC314")
-#   bind_rows(degtab_long, degtab_VRC) %>%
-#     as_tibble() %>%
-#     writexl::write_xlsx("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Table S1 Prevax DEG Tables for KSPZV1 VRC312 VR314 revision.xlsx")
+```{r save DEG tables, echo=FALSE, eval=FALSE, message=FALSE, warning=FALSE}
+degtab_long <- bind_rows(degtab, .id = "treatment") %>%
+  dplyr::select(treatment, GeneSymbol, EnsemblID, descripton_new, logFC,logCPM, F, PValue, FDR) %>%
+  mutate(study = "KSPZV1", timepoint = "pre-immunization baseline adj batch, CSP Ab baseline, Pf VAX1, site", comparison = "protected (P) vs. not protected (NP) at 3 months") %>%
+  dplyr::select(study, treatment, timepoint, comparison, GeneSymbol, EnsemblID, descripton_new, logFC,logCPM, F, PValue, FDR) %>%
+  dplyr::rename(hgnc_symbol = GeneSymbol, ensembl_id = EnsemblID, description = descripton_new)
+degtab_VRC <- readxl::read_excel("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Cell Submission October 2021/Supplementary Tables/Table S1 Prevax DEG Tables for KSPZV1 VRC312 VR314.xlsx") %>%
+              dplyr::filter(study == "VRC312" | study == "VRC314")
+  bind_rows(degtab_long, degtab_VRC) %>%
+    as_tibble() %>%
+    writexl::write_xlsx("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Table S1 Prevax DEG Tables for KSPZV1 VRC312 VR314 revision.xlsx")
 ```
 
-```{r save GSEA tables, echo=FALSE, message=FALSE, warning=FALSE}
-# bind_rows(GSEAtab, .id = "treatment") %>%
-#   as_tibble() %>%
-#   writexl::write_xlsx("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Table SX Prevax GSEA Tables for KSPZV1 revision.xlsx")
+```{r save GSEA tables, echo=FALSE, eval=FALSE, message=FALSE, warning=FALSE}
+bind_rows(GSEAtab, .id = "treatment") %>%
+  as_tibble() %>%
+  writexl::write_xlsx("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Table SX Prevax GSEA Tables for KSPZV1 revision.xlsx")
 ```
 
-```{r save plots 1, echo=FALSE, message=FALSE, warning=FALSE}
+```{r save plots 1, echo=FALSE, eval=FALSE, message=FALSE, warning=FALSE}
 #Figure 2D high-annotation level BTM and Monaco modules
-# Cairo::CairoPDF(file = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Fig2D revised hiBTM Monaco GSEA Bubble Plot.pdf",
-#                 width = 6.125, height = 5.65)
-# TopPlot
-# dev.off()
+Cairo::CairoPDF(file = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Revised Figure Panels/Fig 2D revised hiBTM Monaco GSEA Bubble Plot.pdf",
+                width = 6.125, height = 5.65)
+TopPlot
+dev.off()
 ```
 
-```{r save plots 2, echo=FALSE, message=FALSE, warning=FALSE}
+```{r save plots 2, echo=FALSE, eval=FALSE, message=FALSE, warning=FALSE}
 #Figure S3A,B low-annotation level BTM. Hallmarkmodules
 FigS3_plot <- ggpubr::ggarrange(MidPlot, BottomPlot, common.legend = TRUE, nrow=2)
-ggsave("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Fig S3ABC revised lowBTM HALLMARK BloodGen3 GSEA Bubble Plot.pdf", FigS3_plot, device = "pdf", units = "in", height = 8, width = 14.5)
+ggsave("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Revised Figure Panels/Fig S3ABC revised lowBTM HALLMARK BloodGen3 GSEA Bubble Plot.pdf", FigS3_plot, device = "pdf", units = "in", height = 8, width = 14.5)
 ```
 
-```{r save for IPA, echo = FALSE}
+```{r save for IPA, eval=FALSE, echo = FALSE}
 tabdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/"
 
 temp <- degtab

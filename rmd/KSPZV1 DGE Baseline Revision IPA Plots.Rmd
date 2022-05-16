@@ -1,7 +1,7 @@
 ---
 title: "KSPZV1 DGE Baseline Revision IPA Plots"
 author: "Tuan M. Tran"
-date: "4/28/2022"
+date: "5/14/2022"
 output: html_document
 ---
 
@@ -12,7 +12,7 @@ library(readxl)
 library(googledrive)
 knitr::opts_chunk$set(echo = TRUE)
 datadir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Baseline IPA UpReg Tables Revised/"
-figdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/"
+figdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Revised Figure Panels/"
 ```
 
 ## Objective
@@ -20,9 +20,9 @@ figdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revis
 Makes volcano plots from IPA tables
 
 ```{r readin data, eval=FALSE, message=FALSE, warning=FALSE}
-myFiles <- list.files(path = datadir, pattern='*263 pval25.xls')
+myFiles <- list.files(path = datadir, pattern='*LFC 263 pval25 with logCSP SEX.xls')
 df.list <- lapply(paste0(datadir, myFiles), read_excel, skip = 1)
-names(df.list) <- gsub(" UpReg LFC 263 pval25 with logCSP.xls", "", myFiles)
+names(df.list) <- gsub(" UpReg LFC 263 pval25 with logCSP SEX.xls", "", myFiles)
 
 UpRegPvS <- bind_rows(df.list, .id = "Comparison")
 UpRegPvS %>%
@@ -98,13 +98,13 @@ foo <- UpRegPvS_foo %>%
 #https://datavizpyr.com/how-to-add-labels-to-select-points-with-ggrepel/
 UpRegPvS_label_df <-  UpRegPvS_foo %>%
   dplyr::filter(label %in% foo$label | #limit labels due to space limitations
-                  (`Activation z-score` < -2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "Placebo")|
-                  (`Activation z-score` > 2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "Placebo")|
-                  (`Activation z-score` < -2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "4.5x105")|
-                  (`Activation z-score` > 2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "4.5x105")|
-                  (`Activation z-score` < -2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "4.5x105")|
-                  (`Activation z-score` > 2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "9.0x105")|
-                  (`Activation z-score` < -2.2 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "9.0x105")|
+                  (`Activation z-score` < -2.3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "Placebo")|
+                  (`Activation z-score` > 2.3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "Placebo")|
+                  (`Activation z-score` < -2.3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "4.5x105")|
+                  (`Activation z-score` > 2.3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "4.5x105")|
+                  (`Activation z-score` < -2.3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "4.5x105")|
+                  (`Activation z-score` > 2.3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "9.0x105")|
+                  (`Activation z-score` < -2.3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "9.0x105")|
                   (`Activation z-score` > 2.5 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "1.8x106")|
                   (`Activation z-score` < -3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "1.8x106")|
                   grepl("lipopolysaccharide", .$`Upstream Regulator`) |
@@ -115,15 +115,15 @@ myUpRegPlot <- UpRegPvS_foo %>%
   geom_point(color = as.character(UpRegPvS_foo$color), alpha = 0.6) +
   geom_hline(yintercept = -log10(significance.cutoff), color = "blue", linetype = "dotted") +
   geom_vline(xintercept = c((-1*zscore.cutoff), zscore.cutoff), color = "red", linetype = "dotted") +
-  ggrepel::geom_label_repel(data = UpRegPvS_label_df, force = 15, force_pull = 2, size = 3.4, max.overlaps = 25,
+  ggrepel::geom_label_repel(data = UpRegPvS_label_df, force = 15, force_pull = 2, size = 3.6, max.overlaps = 20,
                             label.size = NA,
-                            label.padding = 0.01,
-                            box.padding = 0.01,
-                            fill = alpha(c("white"),0.7)) +
+                            label.padding = 0.02,
+                            box.padding = 0.02,
+                            fill = alpha(c("white"),0.8)) +
   theme_bw() +
-  xlim(-6.1,6.1)+
+  xlim(-6,6)+
   facet_wrap(~`Dose group`, nrow = 2, ncol = 2) +
-  theme(axis.text=element_text(size=14),
+  theme(axis.text=element_text(size=16),
         axis.title=element_text(size=16),
         strip.text = element_text(size=16),
         strip.background = element_blank())
@@ -132,7 +132,7 @@ myUpRegPlot
 ```
 
 ```{r print to pdf, eval=FALSE, echo=FALSE}
-cairo_pdf(paste0(figdir, "Fig 2E IPA UpReg 4 doses 1x4 revised logCSP.pdf"), height = 6.55, width = 24)
+cairo_pdf(paste0(figdir, "Fig 2E IPA UpReg 4 doses 1x4 revised logCSP SEX.pdf"), height = 6.5, width = 26)
 myUpRegPlot
 dev.off()
 ```
