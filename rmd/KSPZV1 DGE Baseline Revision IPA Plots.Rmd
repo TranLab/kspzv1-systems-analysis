@@ -1,7 +1,7 @@
 ---
 title: "KSPZV1 DGE Baseline Revision IPA Plots"
 author: "Tuan M. Tran"
-date: "5/14/2022"
+date: "5/16/2022"
 output: html_document
 ---
 
@@ -20,7 +20,7 @@ figdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revis
 Makes volcano plots from IPA tables
 
 ```{r readin data, eval=FALSE, message=FALSE, warning=FALSE}
-myFiles <- list.files(path = datadir, pattern='*LFC 263 pval25 with logCSP SEX.xls')
+myFiles <- list.files(path = datadir, pattern='*263 pval25 with logCSP SEX.xls')
 df.list <- lapply(paste0(datadir, myFiles), read_excel, skip = 1)
 names(df.list) <- gsub(" UpReg LFC 263 pval25 with logCSP SEX.xls", "", myFiles)
 
@@ -132,7 +132,7 @@ myUpRegPlot
 ```
 
 ```{r print to pdf, eval=FALSE, echo=FALSE}
-cairo_pdf(paste0(figdir, "Fig 2E IPA UpReg 4 doses 1x4 revised logCSP SEX.pdf"), height = 6.5, width = 26)
+cairo_pdf(paste0(figdir, "Fig 2E IPA UpReg 4 doses 1x4 revised logCSP SEX ", Sys.Date(),".pdf"), height = 6.5, width = 26)
 myUpRegPlot
 dev.off()
 ```
