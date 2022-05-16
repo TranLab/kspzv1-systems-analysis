@@ -192,7 +192,7 @@ for(i in names(xgroup)){
 ```
 
 ```{r save data, echo=FALSE, eval=FALSE}
-save(design, fit, fit2, DeltaProtected, DeltaNotProtected, DeltaDelta, file = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Revision R Objects/DeltaDelta Model highdose PfSPZ only Batch Sex Site CSPAb MALdVaxTotal adj.RData")
+# save(design, fit, fit2, DeltaProtected, DeltaNotProtected, DeltaDelta, file = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Revision R Objects/DeltaDelta Model highdose PfSPZ only Batch Sex Site CSPAb MALdVaxTotal adj.RData")
 ```
 
 
@@ -222,6 +222,40 @@ DeltaDelta$`1.8 x 10^6 PfSPZ`[1:15,c(7,9,2:5,8,10:15)] %>%
   knitr::kable(., row.names = FALSE)
 ```
 
+
+```{r make table s3 delta degs for highdose, echo=FALSE, eval=FALSE}
+resdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/"
+
+dp_bound <- DeltaProtected %>%
+  bind_rows(., .id = "dosegroup") %>%
+  mutate(comparison = "ΔP") %>%
+  mutate(study = "KSPZV1") %>%
+  mutate(timepoint = "delta (post-immunization/pre-immunization baseline")
+
+dnp_bound <- DeltaNotProtected %>%
+  bind_rows(., .id = "dosegroup") %>%
+  mutate(comparison = "ΔNP") %>%
+  mutate(study = "KSPZV1") %>%
+  mutate(timepoint = "delta (post-immunization/pre-immunization baseline")
+
+dd_bound <- DeltaDelta %>%
+  bind_rows(., .id = "dosegroup") %>%
+  mutate(comparison = "ΔP vs ΔNP") %>%
+  mutate(study = "KSPZV1") %>%
+  mutate(timepoint = "delta (post-immunization/pre-immunization baseline")
+
+all_bound <- bind_rows(dp_bound, dnp_bound, dd_bound) %>%
+  dplyr::select(study, dosegroup, timepoint, comparison, GeneSymbol, EnsemblID, descripton_new, everything()) %>%
+  dplyr::select(-c(Description, Chromosome, Start, End, Probe.Strand, Geneid)) %>%
+  dplyr::rename(ensembl_id = "EnsemblID") %>%
+  dplyr::rename(description = "descripton_new") %>%
+  dplyr::rename(hgnc_symbol = "GeneSymbol") %>%
+  as_tibble()
+
+all_bound %>%
+  dplyr::select(study, dosegroup, timepoint, comparison, hgnc_symbol, ensembl_id, description, logFC, AveExpr, t, B, P.Value, adj.P.Val) %>%
+  writexl::write_xlsx(., path = paste0(resdir, "Table S3 Delta DEG Tables for high-dose PfSPZ KSPZV1 REVISED.xlsx"))
+```
 ### Apply GSEA
 
 Rank genes by -log10(P.Value)*sign(logFC). Run fgsea from fgsea package using NamedGeneRankList2GseaTable helper function.
@@ -274,6 +308,19 @@ for(i in names(ranks)){
 }
 ```
 
+```{r make table sx delta gsea for highdose, echo=FALSE, eval=FALSE}
+allGSEA <- GSEAtab$`1.8 x 10^6 PfSPZ` %>%
+  bind_rows(., .id = "comparison") %>%
+  mutate(comparison = gsub("DeltaDelta", "ΔP vs ΔNP", comparison)) %>%
+  mutate(comparison = gsub("Delta", "Δ", comparison)) %>%
+  mutate(study = "KSPZV1") %>%
+  mutate(dosegroup = "1.8 x 10^6 PfSPZ") %>%
+  mutate(timepoint = "delta (post-immunization/pre-immunization baseline") %>%
+  dplyr::select(study, dosegroup, timepoint, comparison, everything())
+
+allGSEA %>%
+  writexl::write_xlsx(., path = paste0(resdir, "Table SX Delta GSEA Tables for high-dose PfSPZ KSPZV1 REVISED.xlsx"))
+```
 ### Visualize GSEA data as bubble plot
 
 Filter based on padj < 0.20.
