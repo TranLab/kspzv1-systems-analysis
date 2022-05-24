@@ -35,7 +35,7 @@ library(ggpubr)
 library(fgsea)
 library(devtools)
 library(knitr)
-figdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/"
+figdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Figures/Revised Figure Panels/"
 ```
 
 
@@ -241,11 +241,11 @@ hm <- Heatmap(exprs(x),
 
 ```{r save heatmap, fig.width= 10, fig.height=7, fig.align="center", eval=FALSE}
 #set dimensions
-myheight <- 10
-mywidth <- 20
-cairo_pdf(paste0(figdir, "Fig 4B Revised Heatmap", " height", myheight, " width", mywidth, ".pdf"), height = myheight, width = mywidth)
-print(hm)
-dev.off()
+# myheight <- 10
+# mywidth <- 20
+# cairo_pdf(paste0(figdir, "Fig 4B Revised Heatmap", " height", myheight, " width", mywidth, ".pdf"), height = myheight, width = mywidth)
+# print(hm)
+# dev.off()
 ```
 
 ## Extract clustering information
@@ -294,7 +294,6 @@ pData.cluster <- pData(x) %>%
 table(pData.cluster$Cluster,pData.cluster$treat)
 table(pData.cluster$Cluster.pam4.cl16,pData.cluster$treat)
 ```
-
 ## Plot stats based on clusters
 
 ```{r make stats plots based on clusters, message=FALSE, warning=FALSE}
@@ -514,8 +513,6 @@ print(ggarrange(
 )
 ```
 
-
-
 ```{r plot plots based on clusters ggsave, eval=FALSE, echo=FALSE}
 # cairo_pdf(filename = paste0(figdir, "Fig S5A Revision.pdf"), height = 7, width = 8)
 # print(ggarrange(
@@ -533,6 +530,46 @@ print(ggarrange(
 # dev.off()
 ```
 
+## Examine SC2 Placebo vs SC2 1.8x10^6 PfSPZ
+
+```{r make sc2 specific barplot, echo=TRUE, message=FALSE, warning=FALSE}
+sc2_subset <- pData.cluster %>%
+  filter(Cluster == "SC2") %>%
+  filter(treat == "Placebo" | treat == "1.8 x 10^6 PfSPZ") %>%
+  droplevels() %>%
+  mutate(treat = factor(treat)) %>%
+  mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)")))
+
+#OUTCOME SC2 Placebo vs SC2 1.8x10^6 PfSPZ
+foo <- signif(fisher.test(table("Dosegroup" = sc2_subset$treat, "Outcome" = sc2_subset$Outcome))$p.value,2)
+foo_text <- ifelse(foo >= 0.05, "",
+              ifelse(foo >= 0.01 & foo < 0.05, "*",
+                     ifelse(foo >= 0.001 & foo1[i] < 0.01, "**",
+                            ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
+dat_text <- data.frame(label = foo_text, x = 1.5, y = 9, Outcome = c("not protected (infected)", "protected (uninfected)"))
+
+Outcome.counts <- sc2_subset  %>%
+  ggplot(., aes(x=treat, fill = Outcome)) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
+  ylab("Outcome (count)") +
+  theme_classic(base_family = "Arial", base_size = 10) +
+  theme(axis.text.x=element_text(angle = 45, vjust = -1, hjust = 0),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        strip.background = element_rect(fill="white"),
+        legend.position="none"
+        ) +
+  geom_text(data = dat_text,
+    mapping = aes(x = x, y = y, label = label))
+```
+
+
+```{r save make sc2 specific barplot}
+cairo_pdf(filename = paste0(figdir, "Fig S5B SC2 sub Revision.pdf"), height = 1.25, width = 1)
+Outcome.counts
+dev.off()
+```
 
 ### Extract clustering information for rows (genes)
 

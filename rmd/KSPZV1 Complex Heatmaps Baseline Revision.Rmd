@@ -1,7 +1,7 @@
 ---
 title: "KSPZV1 Complex Heatmaps Baseline - Revision"
 author: "Tuan M. Tran"
-date: "05/05/2022"
+date: "05/17/2022"
 output: html_document
 ---
 
@@ -16,6 +16,7 @@ The following code generates the unsupervised hierarchical clustering heatmap fo
 This script reproduces Figures 1C, S2, 1D, 1E in the revised manuscript. It includes the following changes:
 
 1. Add study site (Wagai vs Siaya) to column annotations
+2. Add chunk for comparing P vs NP between SC1 Placebo and SC1 1.8x10^6 PfSPZ
 
 ## Load required packages
 
@@ -262,11 +263,11 @@ if(ClusterCols == TRUE){
 
 ```{r save heatmap, fig.width= 10, fig.height=7, fig.align="center", eval=FALSE}
 #set dimensions
-myheight <- 10
-mywidth <- 16
-cairo_pdf(paste0(figdir, "Fig1C Revised Heatmap", " height", myheight, " width", mywidth, ".pdf"), height = myheight, width = mywidth)
-print(hm)
-dev.off
+# myheight <- 10
+# mywidth <- 16
+# cairo_pdf(paste0(figdir, "Fig1C Revised Heatmap", " height", myheight, " width", mywidth, ".pdf"), height = myheight, width = mywidth)
+# print(hm)
+# dev.off
 ```
 
 ## Extract clustering information
@@ -675,23 +676,65 @@ print(ggarrange(
 ```
 
 ```{r plot plots based on clusters ggsave,eval=FALSE}
-cairo_pdf(filename = paste0(figdir, "Fig S2 Revision.pdf"), height = 8, width = 8)
-print(ggarrange(
-  Outcome.counts,
-  TTE.boxplot,
-  CSPbl.boxplot,
-  CSPlogfc.boxplot,
-  Weight4Age,
-  Age.boxplot,
-  Gender.counts,
-  Pf.counts,
-  Site.counts,
-  labels = "AUTO",
-  ncol = 2,
-  nrow = 5)
-  )
+# cairo_pdf(filename = paste0(figdir, "Fig S2 Revision.pdf"), height = 8, width = 8)
+# print(ggarrange(
+#   Outcome.counts,
+#   TTE.boxplot,
+#   CSPbl.boxplot,
+#   CSPlogfc.boxplot,
+#   Weight4Age,
+#   Age.boxplot,
+#   Gender.counts,
+#   Pf.counts,
+#   Site.counts,
+#   labels = "AUTO",
+#   ncol = 2,
+#   nrow = 5)
+#   )
+# dev.off()
+```
+
+## Examine SC1 Placebo vs SC1 1.8x10^6 PfSPZ
+
+```{r make sc1 specific barplot, echo=TRUE, message=FALSE, warning=FALSE}
+sc1_subset <- pData.cluster %>%
+  filter(Cluster == "SC1") %>%
+  filter(treat == "Placebo" | treat == "1.8 x 10^6 PfSPZ") %>%
+  droplevels() %>%
+  mutate(treat = factor(treat)) %>%
+  mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)")))
+
+#OUTCOME SC1 Placebo vs SC1 1.8x10^6 PfSPZ
+foo <- signif(fisher.test(table("Dosegroup" = sc1_subset$treat, "Outcome" = sc1_subset$Outcome))$p.value,2)
+foo_text <- ifelse(foo >= 0.05, "",
+              ifelse(foo >= 0.01 & foo < 0.05, "*",
+                     ifelse(foo >= 0.001 & foo1[i] < 0.01, "**",
+                            ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
+dat_text <- data.frame(label = foo_text, x = 1.5, y = 9, Outcome = c("not protected (infected)", "protected (uninfected)"))
+
+Outcome.counts <- sc1_subset  %>%
+  ggplot(., aes(x=treat, fill = Outcome)) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
+  ylab("Outcome (count)") +
+  theme_classic(base_family = "Arial", base_size = 10) +
+  theme(axis.text.x=element_text(angle = 45, vjust = -1, hjust = 0),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        strip.background = element_rect(fill="white"),
+        legend.position="none"
+        ) +
+  geom_text(data = dat_text,
+    mapping = aes(x = x, y = y, label = label))
+```
+
+
+```{r save make sc1 specific barplot}
+cairo_pdf(filename = paste0(figdir, "Fig S5B SC1 sub Revision.pdf"), height = 1.25, width = 1)
+Outcome.counts
 dev.off()
 ```
+
 
 ## Extract clustering information for rows (genes)
 

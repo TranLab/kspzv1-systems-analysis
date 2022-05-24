@@ -446,10 +446,10 @@ gois_ms %>%
 ```
 
 ```{r output table of DEGS, echo=FALSE, eval=FALSE}
-# resdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/"
-# gois_ms %>%
-#   mutate_if(is.numeric, signif,3) %>%
-#   writexl::write_xlsx(paste0(resdir, "Table 4H Delta Post-vax DEGs Revised Adj Batch Sex Site log CSP Ab baseline MALdVaxTotal.xlsx"))
+resdir <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/"
+gois_ms %>%
+  mutate_if(is.numeric, signif,3) %>%
+  writexl::write_xlsx(paste0(resdir, "Table 4H Delta Post-vax DEGs Revised Adj Batch Sex Site log CSP Ab baseline MALdVaxTotal.xlsx"))
 ```
 
 ### Reshape and merge for survival analysis
