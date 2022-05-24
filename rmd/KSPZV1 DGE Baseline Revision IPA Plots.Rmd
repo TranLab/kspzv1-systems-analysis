@@ -66,12 +66,11 @@ UpRegPvS_foo <- UpRegPvS %>%
   mutate(`-log10(p-value of overlap)` = -log10(`p-value of overlap`)) %>%
   mutate(`-log10(B-H adj. p value)` = -log10(`B-H corrected p-value`)) %>%
   mutate(`Upstream Regulator` = gsub("\\(and other miRNAs.*", "", `Upstream Regulator`)) %>%
-  mutate(significant = ifelse(`B-H corrected p-value` < significance.cutoff & `Activation z-score` >= 2.2 |
-                                `B-H corrected p-value`< significance.cutoff & `Activation z-score` <= - 2, TRUE, FALSE)) %>%
-  filter(`B-H corrected p-value`< significance.cutoff) %>%
+  mutate(significant = ifelse(`B-H corrected p-value` < significance.cutoff & `Activation z-score` >= 2 |
+                                `B-H corrected p-value`< significance.cutoff & `Activation z-score` <= -2, TRUE, FALSE)) %>%
   mutate(color = ifelse(significant == TRUE & `Activation z-score`>0, "red", "grey50")) %>%
   mutate(color = ifelse(significant == TRUE & `Activation z-score` < 0, "blue", color)) %>%
-  mutate(label = ifelse(significant == TRUE, `Upstream Regulator`, "")) %>%
+  mutate(label = ifelse(significant == TRUE, `Upstream Regulator`, ""))  %>%
   filter(MoleculeType %in% MoleculeTypes) %>%
   mutate(label = gsub("Salmonella enterica serotype abortus equi lipopolysaccharide", "Salmonella LPS", label)) %>%
   mutate(label = gsub("salmonella minnesota R595 lipopolysaccharides", "Salmonella LPS", label)) %>% #replacing long names with shorter names/synonyms
@@ -79,6 +78,7 @@ UpRegPvS_foo <- UpRegPvS %>%
   mutate(label = gsub("sphingosine-1-phosphate", "S1P", label)) %>% #replacing long names with shorter names/synonyms
   mutate(label = gsub("beta-estradiol", "β-estradiol", label)) %>% #replacing long names with shorter names/synonyms
   mutate(label = gsub("Interferon alpha", "IFNα", label)) %>% #replacing long names with shorter names/synonyms
+  mutate(label = gsub("IL1B", "IL1", label)) %>% #replacing long names with shorter names/synonyms
   mutate(label = gsub("IL1", "IL1β", label)) %>% #replacing long names with shorter names/synonyms
   mutate(label = gsub("IFN Beta", "IFNβ", label)) %>% #replacing long names with shorter names/synonyms
   mutate(label = gsub("Ifnar", "IFNAR", label)) %>% #replacing long names with shorter names/synonyms
@@ -89,12 +89,16 @@ UpRegPvS_foo <- UpRegPvS %>%
   mutate(label = gsub("LPSs", "LPS", label)) %>% #replacing long names with shorter names/synonyms
   mutate(label = gsub("lipopolysaccharide", "LPS", label)) %>% #replacing long names with shorter names/synonyms
   mutate(label = gsub("medroxyprogesterone acetate", "MPA", label))
+
 #identify upstream regulators that appear as significant in more than one comparison
 foo <- UpRegPvS_foo %>%
+  dplyr::filter(significant == TRUE) %>%
+  dplyr::filter(`Dose group`== "Placebo" | `Dose group`== "1.8x106") %>%
   group_by(label) %>%
   summarize(n = n()) %>%
-  dplyr::filter(n > 1) %>%
-  dplyr::filter(label != "")
+  dplyr::filter(n > 1)
+
+
 #https://datavizpyr.com/how-to-add-labels-to-select-points-with-ggrepel/
 UpRegPvS_label_df <-  UpRegPvS_foo %>%
   dplyr::filter(label %in% foo$label | #limit labels due to space limitations
@@ -106,9 +110,7 @@ UpRegPvS_label_df <-  UpRegPvS_foo %>%
                   (`Activation z-score` > 2.3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "9.0x105")|
                   (`Activation z-score` < -2.3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "9.0x105")|
                   (`Activation z-score` > 2.5 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "1.8x106")|
-                  (`Activation z-score` < -3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "1.8x106")|
-                  grepl("lipopolysaccharide", .$`Upstream Regulator`) |
-                  grepl("IL1", .$`Upstream Regulator`)) #limit label to upstream regulators that appear as significant in more than one comparison  
+                  (`Activation z-score` < -3 & `B-H corrected p-value` < significance.cutoff & `Dose group` == "1.8x106")) #limit label to upstream regulators that appear as significant in more than one comparison  
 
 myUpRegPlot <- UpRegPvS_foo %>%
   ggplot(., aes(x = `Activation z-score`, y = `-log10(B-H adj. p value)`, label = label)) + 

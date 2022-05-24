@@ -639,6 +639,47 @@ print(ggarrange(
   )
 ```
 
+## Examine SC1 Placebo vs SC1 1.8x10^6 PfSPZ
+
+```{r make sc2 specific barplot, echo=TRUE, message=FALSE, warning=FALSE}
+sc1_subset <- pData.cluster %>%
+  filter(Cluster == "SC1") %>%
+  filter(treat == "Placebo" | treat == "1.8 x 10^6 PfSPZ") %>%
+  droplevels() %>%
+  mutate(treat = factor(treat)) %>%
+  mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)")))
+
+#OUTCOME sc1 Placebo vs sc1 1.8x10^6 PfSPZ
+foo <- signif(fisher.test(table("Dosegroup" = sc1_subset$treat, "Outcome" = sc1_subset$Outcome))$p.value,2)
+foo_text <- ifelse(foo >= 0.05, "",
+              ifelse(foo >= 0.01 & foo < 0.05, "*",
+                     ifelse(foo >= 0.001 & foo1[i] < 0.01, "**",
+                            ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
+dat_text <- data.frame(label = foo_text, x = 1.5, y = 9, Outcome = c("not protected (infected)", "protected (uninfected)"))
+
+Outcome.counts <- sc1_subset  %>%
+  ggplot(., aes(x=treat, fill = Outcome)) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
+  ylab("Outcome (count)") +
+  theme_classic(base_family = "Arial", base_size = 10) +
+  theme(axis.text.x=element_text(angle = 45, vjust = -1, hjust = 0),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        strip.background = element_rect(fill="white"),
+        legend.position="none"
+        ) +
+  geom_text(data = dat_text,
+    mapping = aes(x = x, y = y, label = label))
+```
+
+
+```{r save make sc1 specific barplot}
+cairo_pdf(filename = paste0(figdir, "Fig S5B SC1 sub Revision.pdf"), height = 1.25, width = 1)
+Outcome.counts
+dev.off()
+```
+
 ## Extract clustering information for rows (genes)
 
 Note: may have to run this chunk directly in console if you get an error:
