@@ -1,0 +1,261 @@
+---
+title: "PfSPZ correlation chord diagrams (gene level) using postvax non transcriptomic and baseline gene expression"
+author: "Prasida Holla"
+date: "5/5/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objective:
+To make linear correlations between the PfSPZ vaccine baseline transcriptomic data and post-vaccination non-transcriptomic data, the latter of which includes select features from the phenoData, and flow cytometric parameters. The transcriptomic data from RNA-seq is presented as such, and not collapsed into BTMs or other modules.This analysis was done based on reviewers' comments to validate transcription modules that came up as strongly correlated with non-transcriptomic features at a gene level. The correlations are visualized as a chord diagram or circos plot. 
+
+Steps:
+1. Load the post-vaccination non-transcriptomic data with select features 
+2. Load the baseline expression data 
+3. Analyse baseline gene expression data: Filter out low expressing genes and select genes with fraction of highest variation. Add a label to each gene ("_gene") so that gene to gene correlations can be filtered out from the final correlation matrix. 
+4. Run correlations using corrplot. The correlation analysis should give a table of Pearson's r values and pvalues for each correlation pair
+5. Convert pvalues to FDR and filter to keep only significant correlations
+6. Keeping only the top triangle of the correlation matrix and remove gene to gene correlations.
+7. Use the package 'circlize' to visualize the correlations as a chord diagram (aka circos plot). 
+8. This script is specifically for baseline gene expression to post-vaccination FACS features.
+
+
+## Load required packages
+```{r load libraries, include = TRUE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tibble)
+library(viridis)
+library(ggpubr)
+library(readxl)
+library(ggcorrplot)
+library(org.Hs.eg.db)
+library(Biobase)
+library(miscTools)
+library(circlize)
+library(RColorBrewer)
+library(doBy)
+library(googledrive)
+library(stats)
+library(data.table)
+library(Cairo)
+library(EDASeq)
+```
+
+# Import baseline and post-vax expression sets, and facs data
+```{r import datasets, include = TRUE, message=FALSE, warning=FALSE}
+#load the baseline expression dataset
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("1Q4VXYxdl9CqtzhcvHA9pn8q06_YOZgi8"), path = temp, overwrite = TRUE)
+esetb <- readRDS(file = dl$local_path)
+
+##import all non-transcriptomic data
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("17am8dI5dAhfzrS5a9ywBOL6mXSnn3mh2"), path = temp, overwrite = TRUE)
+facs <- readRDS(file = dl$local_path)
+```
+
+```{r gene expression data analysis, include = TRUE, message=FALSE, warning=FALSE}
+e<-counts(esetb)
+
+selectGenes <- function(counts, min.count=10, N=0.90){
+  lib.size <- colSums(counts)
+  MedianLibSize <- median(lib.size)
+  CPM.Cutoff <- min.count / MedianLibSize*1e6
+  CPM <- edgeR::cpm(counts,lib.size=lib.size)
+ 
+  min.samples <- round(N * ncol(counts))
+ 
+  f1 <- genefilter::kOverA(min.samples, CPM.Cutoff)
+  flist <- genefilter::filterfun(f1)
+  keep <- genefilter::genefilter(CPM, flist)
+ 
+  return(keep)
+}
+
+# and filter your eset
+keep.exprs <- selectGenes(e, min.count=10, N=0.90)
+myFilt <- e[keep.exprs,]
+
+
+# Remove time point T=25
+myFilt<-myFilt[,c(1:244)]
+
+#keep only highest variance genes:
+
+madsno <- as.integer(nrow(myFilt)/2) 
+mads <- apply(myFilt, 1, mad)
+e <-myFilt[mads > sort(mads, decr=TRUE)[madsno],]
+
+# Scale data
+e<- e %>%
+t(.) %>%
+scale(., center = TRUE, scale = TRUE) %>%
+t(.)
+
+# ENSEMBLIDs to gene names
+symbols <- mapIds(org.Hs.eg.db,
+keys=row.names(e),
+column="SYMBOL",
+keytype="ENSEMBL",
+multiVals="first")
+expr_data<-merge(e, symbols, by=0)
+expr_data<-expr_data[,-1]
+ncol(expr_data)
+expr_data<-expr_data[!duplicated(expr_data$y),]
+expr_data<-expr_data[!is.na(expr_data$y),] ## or you can run --> expr_data<-subset(expr_data, !is.na(expr_data$y))
+rownames(expr_data)<-(expr_data[,245])
+expr_data<-expr_data[,-245]
+
+# Clean up and transpose
+gene_data<-data.frame(expr_data)%>%rownames_to_column(., var = "Genes")
+gene_data<-t(gene_data) 
+colnames(gene_data) <- gene_data[1,]
+gene_data<-gene_data[-1,]
+gene_data<-data.frame(gene_data)%>%rownames_to_column(., var="PATID.OG")
+
+#Change all the scores in the expr_data from 'factor' to 'numeric'
+indx <- sapply(gene_data, is.character)
+gene_data[indx] <- lapply(gene_data[indx], function(x) as.numeric(as.character(x)))
+gene_data<-gene_data[, -1]
+e<-t(expr_data)
+e<-as.data.frame(e)%>%rownames_to_column(., var="PATID.OG")
+gene_data$`PATID.OG`<-e[,1]
+gene_data <- gene_data %>%
+  dplyr::select("PATID.OG", everything())
+```
+
+# Merge transcriptomic and non-transcriptomic data
+```{r merge gene_data with non-transcriptomic data, include = TRUE, message=FALSE, warning=FALSE}
+# Add "Gene_" to each of the gene names (to filter out gene to gene correlations later)
+colnames(gene_data)<-paste(colnames(gene_data), "_Gene")
+gene_data<-gene_data%>%dplyr::rename(., "PATID.OG"="PATID.OG _Gene")
+
+# For convenience, change patient_ids in the non-transcriptomic 'facs' from time '_25' to time '_0'
+facs<-facs%>%dplyr::mutate(., "PATID.OG"=str_replace(PATID.OG, '_.*', "_0"))
+
+# Keep the same Patient_ids in baseline gene expression data and post-vaccination non-transcriptomic data
+gene_data<-gene_data%>% filter(., PATID.OG %in% facs$PATID.OG)
+nrow(gene_data)
+facs<-facs%>% filter(., PATID.OG %in% gene_data$PATID.OG)
+nrow(facs)
+
+# Merge the gene_data with alldata
+alldata<-facs%>%
+left_join(., gene_data,  by="PATID.OG")
+alldata<-alldata[,-1]
+```
+
+# Rename columns
+```{r rename columns}
+alldata<-alldata %>%
+  dplyr::rename("Outcome" = "tte.mal.atp.6") %>%
+  dplyr::rename("PfSPZ stimulated CD4+ T cells" = "FACS_PfSPZ-specific_CD3+CD4+_of_live_lymphocytes")%>%
+  dplyr::rename( "PfSPZ stimulated CD8+ T cells"= "FACS_PfSPZ-specific_CD3+CD8+_of_live_lymphocytes")%>%
+  dplyr::rename("CD19+ B cells" = "FACS_CD19+_of_live_lymphocytes")%>%
+  dplyr::rename("FACS Plasmablasts" = "FACS_Plasmablasts_of_live_lymphocytes")%>%
+  dplyr::rename("CD11c+ monocytes" = "FACS_CD11c+_of_live_monocytes")%>%
+  dplyr::rename("CD14+ monocytes" = "FACS_CD14+_of_live_monocytes")%>%
+  dplyr::rename("CSP specific of memory B cells" = "FACS_CSP-spec_of_memory_B_cells")%>%
+  dplyr::rename("IgG+ of CSP specific B cells" = "FACS_IgG_of_CSP-spec")%>%
+  dplyr::rename("IgM+ of CSP specific B cells" = "FACS_IgM_of_CSP-spec")%>%
+  dplyr::rename("IgG-IgM- of CSP specific B cells"= "FACS_IgG-IgM-_of_CSP-spec")%>%
+  dplyr::rename("Atypical memory of B cells" = "FACS_atypical_memory_of_B_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ1 of T cells"  = "FACS_PfSPZ-specific_Vd1_of_T_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ1/2 of T cells"  = "FACS_PfSPZ-specific_Vd1/2-_of_T_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ9-Vδ2+ of T cells"  = "FACS_PfSPZ-specific_Vg9-Vd2+_of_T_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ9+Vδ2+ of T cells"  = "FACS_PfSPZ-specific_Vg9+Vd2+_of_T_cells")%>%
+  dplyr::rename("CD14+CD16+ of monocytes"  = "FACS_CD14+CD16+_of_live_monocytes")%>%
+  dplyr::rename("CD14+CD16- of monocytes"  = "FACS_CD14+CD16-_of_live_monocytes")%>%
+  dplyr::rename("CD14-CD16+ of monocytes"  = "FACS_CD14-CD16+_of_live_monocytes")%>%
+  dplyr::rename("Postvax anti-CSP IgG"  = "anti-CSP IgG")
+```
+
+# Run correlations and calculate FDR
+```{r run correlations, include = TRUE, message=FALSE, warning=FALSE}
+#Create a correlation matrix
+cor_mat<-cor(na.omit(alldata, use = "pairwise.complete.obs"))
+# Create a p value matrix
+p_mat<-cor_pmat(na.omit(alldata), use="pairwise.complete.obs")
+# Convert p values to False Discovery Rates
+p_mat[]<-p.adjust(p_mat, method = 'BH' )
+p_mat[lower.tri(p_mat, diag=TRUE)] <- NA 
+p_mat <- pmax(p_mat, t(p_mat), na.rm=TRUE)
+fdr <- 0.001
+d_sig  <- which(p_mat <fdr, arr.ind = T)
+foo_cor <- cor_mat[unique(d_sig[,1]),unique(d_sig[,2])]  #get row and columns that include significant values
+foo_pval <- p_mat[unique(d_sig[,1]),unique(d_sig[,2])]  #get row and columns that include significant values
+foo_cor[foo_pval>=fdr] <- 0                                 #for cor values not significant, make 0
+foo_cor[foo_cor>0.999999] <- 0                                 #Remove self-correlations of each observation
+```
+
+# Remove gene to gene correlations and remove negative correlations
+```{r remove gene to gene correlations, include = TRUE, message=FALSE, warning=FALSE}
+indx_col <- grepl('Gene', colnames(foo_cor))
+indx_row <- grepl('Gene', rownames(foo_cor))
+foo_cor[indx_row, indx_col]<-0
+
+# Keep only positive correlations
+foo_cor[foo_cor<0] <- 0
+foo_cor[foo_cor == 0] <- NA
+```
+
+# Create categories for each observation (can be used to generate sectors in the chord diagram) 
+```{r create sector labels for chord diagram, include = TRUE, message=FALSE, warning=FALSE}
+combo3<-as.data.frame(foo_cor)
+combo3$Data.Type <- "Gene Expression"
+combo3$Data.Type <- ifelse(grepl("Outcome", rownames(combo3)), "Outcome", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("PfSPZ stimulated CD4\\+ T cells", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("PfSPZ stimulated CD8\\+ T cells", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("CD19\\+ B cells", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("FACS Plasmablasts", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("CD11c\\+ monocytes", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("CD14\\+ monocytes", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("CSP specific of memory B cells", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("IgM\\+ of CSP specific B cells", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("IgG\\+ of CSP specific B cells", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("IgG\\-IgM\\- of CSP specific B cells", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("Atypical memory of B cells", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ1 of T cells", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ1/2 of T cells", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ9\\-Vδ2\\+ of T cells", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ9\\+Vδ2\\+ of T cells", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("CD14\\+CD16\\+ of monocytes", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("CD14\\+CD16\\- of monocytes", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("CD14\\-CD16\\+ of monocytes", rownames(combo3)), "Cellular expression", combo3$Data.Type) 
+combo3$Data.Type <- ifelse(grepl("Postvax anti-CSP IgG", rownames(combo3)), "Outcome", combo3$Data.Type)
+
+# Arrange by category: 
+combo3<-combo3 %>% arrange(factor(Data.Type, levels = c("Outcome","Cellular expression", "Gene Expression"))) 
+combo4 <- combo3[,intersect(rownames(combo3), colnames(combo3))]
+combo4[upper.tri(combo4)] <- 0  
+combo4[combo4<0] <- 0
+combo4[combo4 == 0] <- NA
+```
+
+# Create chord diagram
+```{r}
+# Define presets for chord diagram
+mat <- as.matrix(combo4)
+order<-colnames(mat)
+col_fun <- colorRamp2(c( 0, 1), c( "white", "darkblue"), transparency = 0.5)
+
+# And plot the diagram
+circos.par(canvas.xlim = c(-1.8,1.8), canvas.ylim = c(-1.8,1.8), points.overflow.warning=FALSE,
+track.margin = c(0.01, 0.05), # adjust bottom and top margin
+track.height = 0.05,  gap.degree =4)
+chordDiagram(mat, order=order, col = col_fun(mat), annotationTrack = NULL, link.largest.ontop = TRUE, preAllocateTracks = list(track.height = 0.1), transparency = 0.25, self.link = 1)
+circos.trackPlotRegion(track.index = 1, panel.fun = function(x, y) {
+xlim = get.cell.meta.data("xlim")
+ylim = get.cell.meta.data("ylim")
+sector.name = get.cell.meta.data("sector.index")
+circos.text(mean(xlim), ylim[1] + 1, sector.name, facing = "clockwise", niceFacing = TRUE, adj = c(0, 0), cex = 0.7) #text for parameters
+circos.axis(h = "top", labels.cex = 0.3, major.tick = FALSE, sector.index = sector.name, track.index = 1, labels = FALSE)
+}, bg.border = NA)
+circos.clear()
+```
+
