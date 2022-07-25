@@ -34,13 +34,17 @@ Code for systems analysis of KSPZV1 malaria vaccine trial.
 
 [Correlation between cellular and CSP-specific response features and time-to-first parasitemia through 6 month surveillance](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Correlate-Cellular-and-CSP-IgG-Features-to-TTE-6-months.html)
 
-[Correlations, pre-immunization baseline](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Correlations-and-Chord-Diagrams-Baseline.html)
+[Correlations, pre-immunization baseline (REVISED)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Correlations-and-Chord-Diagrams-Baseline-06012022.html)
 
-[Correlations, post-vax only](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Correlations-and-Chord-Diagrams-Postvax.html)
+[Correlations, post-vax only (REVISED)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Correlations-and-Chord-Diagrams-Postvax-06012022.html)
 
-[Correlations, Δ (post-vax/baseline)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Correlations-and-Chord-Diagrams-Delta.html)
+[Correlations, Δ (post-vax/baseline) (REVISED)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Correlations-and-Chord-Diagrams-Delta-06012022.html)
+
+[Gene-level Correlations, baseline (NEW)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-gene-level-Chord-Diagram.html)
+
+[Gene-level Correlations, Δ (post-vax/baseline) (NEW)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-gene-level-correlations-to-postvax-data-Fig-S6-06012022.html)
 
 ## Other
 
-[ST3GAL3 heatmap from other datasets](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-ST3GAL3-heatmap-from-other-datasets.html)
+[FSTL4 heatmap from other datasets (NEW)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-FSTL4-heatmap-from-other-datasets-06012022.html)
 
