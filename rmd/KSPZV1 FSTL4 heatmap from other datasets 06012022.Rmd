@@ -1,0 +1,169 @@
+---
+title: "FSTL4 Heatmap from various datasets"
+author: "Prasida Holla"
+date: "05/10/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load required packages 
+
+```{r load libraries, include = TRUE, message=FALSE, warning=FALSE}
+library(ComplexHeatmap)
+library(tidyverse)
+library(Seurat) 
+library(grid)
+library(googledrive)
+```
+
+# Objective
+This is formaking heatmaps that compare the expresseion levels of a gene of interest, in this case, FSTL4, across published transcriptomic datasets
+The datasets used here include
+1. RNA HPA blood cell gene data (available for downlaod at https://www.proteinatlas.org/about/download, Citation:  Uhlen M, Karlsson MJ, … Fagerberg L, Brodin P. A genome-wide transcriptomic analysis of protein-coding genes in human blood cells. Science. 2019 366(6472)) 
+
+2.RNA Monaco blood cell gene data (available for download at https://www.proteinatlas.org/about/download, Accession number: GSE107011)
+
+3.RNA Schmiedel blood cell gene data (avaialble for download at https://www.proteinatlas.org/about/download, Accession number:  phs001703.v1.p1.)
+
+#Step 1: Import bulk RNA-seq datasets
+```{r import RNA-seq datasets downloaded from Protein Atlas onto Google Drive,  message=FALSE, warning=FALSE}
+#HPA_Blood
+temp <- tempfile(fileext = ".tsv")
+dl <- drive_download(
+  as_id("1-NhBNSH5iE8ZbnZjlq5M8yCj1x4o5sK7"), path = temp, overwrite = TRUE)
+hpa_blood <- read.table(file = dl$local_path, sep = '\t', header = TRUE, check.names = F)
+
+# Monaco
+temp <- tempfile(fileext = ".tsv")
+dl <- drive_download(
+  as_id("1-KVniCQuQnxSsw78MhyHGMT1zdIvUIf3"), path = temp, overwrite = TRUE)
+monaco <- read.table(file = dl$local_path, sep = '\t', header = TRUE, check.names = F)
+
+# Schmiedel
+temp <- tempfile(fileext = ".tsv")
+dl <- drive_download(
+  as_id("1-KM25oR5mCubweOHzO80_Ul8rMIHeJuC"), path = temp, overwrite = TRUE)
+schmiedel <- read.table(file = dl$local_path, sep = '\t', header = TRUE, check.names = F)
+```
+
+#Step 2: Keep only gene(s) of interest (FSTL4) from each of the three bulk RNA-seq datasets
+
+```{r filter bulk RNAseq datasets for FSTL4,  message=FALSE, warning=FALSE}
+#HPA_blood
+hpa_blood<-hpa_blood%>%rename("Gene_name"="Gene name")%>%filter(Gene_name %in% "FSTL4")
+hpa_blood<-hpa_blood[,c(2,3,5)]
+
+#Schmiedel
+schmiedel<-schmiedel%>%rename("Gene_name"="Gene name")%>%filter(Gene_name %in% "FSTL4")
+schmiedel<-schmiedel[,c(2,3,4)]
+
+#Monaco
+monaco<-monaco%>%rename("Gene_name"="Gene name")%>%filter(Gene_name %in% "FSTL4")
+monaco<-monaco[,c(2,3,5)]
+```
+
+# Step 5: Harmonize blood cell names in the datasets to merge them accurately
+
+```{r change names to harmonize datasets,  message=FALSE, warning=FALSE}
+#HPA
+hpa_blood<-hpa_blood[-c(3,19),]
+hpa_blood$`Blood cell`<-as.character(hpa_blood$`Blood cell`)
+hpa_blood[hpa_blood=="memory CD4 T-cell"]<-"Memory CD4 T-cell Th1"
+hpa_blood[hpa_blood=="memory CD8 T-cell"]<-"Central memory CD8 T-cell"
+
+#Monaco
+monaco<-monaco[-c(24,27, 28,29),]
+
+#Schmiedel
+schmiedel<-schmiedel[-c(7, 10, 12), ]
+schmiedel$`Blood cell`<-as.character(schmiedel$`Blood cell`)
+schmiedel[schmiedel=="Naive T-reg"]<-"T-reg"
+```
+
+# Step 6: Merge the datasets together
+```{r merge datasets,  message=FALSE, warning=FALSE}
+a<-merge(monaco, hpa_blood, by="Blood cell", all=T, suffixes = c("_Monaco", "_HPA"))
+a<-a[, -c(2,4)]
+b<-merge(a,schmiedel, by="Blood cell", all =T, suffixes = c("", "schmiedel"))
+b<-b%>%dplyr::rename(., "Schmiedel"= "TPM")
+b<-b[,-4]
+```
+
+# Step 7: Arrange the blood cells in the order they will be shown in the heatmap and modify names
+
+```{r final clean up,  message=FALSE, warning=FALSE}
+alldat<-b %>% arrange(factor(`Blood cell`, levels = c("basophil", "neutrophil","classical monocyte","intermediate monocyte",  "non-classical monocyte", "NK-cell", "myeloid DC", "plasmacytoid DC", "MAIT T-cell", "B cell progenitor", "naive B-cell", "Non-switched memory B-cell", "Switched memory B-cell", "Exhausted memory B-cell", "Plasmablast", "naive CD4 T-cell", "Memory CD4 T-cell TFH", "Memory CD4 T-cell Th1", "Memory CD4 T-cell Th1/Th17", "Memory CD4 T-cell Th17", "Memory CD4 T-cell Th2", "naive CD8 T-cell", "Central memory CD8 T-cell", "Effector memory CD8 T-cell", "T-reg", "Vd2 gdTCR", "Non-Vd2 gdTCR")))
+alldat<-alldat[-c(27:28),]
+
+#Rename the cell types
+alldat$`Blood cell`<-as.character(alldat$`Blood cell`)
+alldat[alldat == "basophil"]<-"Basophil"
+alldat[alldat == "neutrophil"]<-"Neutrophil"
+alldat[alldat == "classical monocyte"]<-"Classical monocyte"
+alldat[alldat == "intermediate monocyte"]<-"Intermediate monocyte"
+alldat[alldat == "non-classical monocyte"]<-"Non-classical monocyte"
+alldat[alldat == "NK-cell"]<-"NK cell"
+alldat[alldat == "myeloid DC"]<-"Myeloid DC"
+alldat[alldat == "plasmacytoid DC"]<-"plasmacytoid DC"
+alldat[alldat == "MAIT T-cell"]<-"MAIT T cell"
+alldat[alldat == "B cell progenitor"]<-"B cell progenitor"
+alldat[alldat == "naive B-cell"]<-"Naive B cell"
+alldat[alldat == "Non-switched memory B-cell"]<-"Non-switched memory B cel"
+alldat[alldat == "Switched memory B-cell"]<-"Switched memory B cell"
+alldat[alldat == "Exhausted memory B-cell"]<-"Exhausted memory B cell"
+alldat[alldat == "Plasmablast"]<-"Plasmablasts"
+alldat[alldat == "naive CD4 T-cell"]<-"Naive CD4 T cell"
+alldat[alldat == "Memory CD4 T-cell TFH"]<-"Memory CD4 T cell: TFH"
+alldat[alldat == "Memory CD4 T-cell Th1"]<-"Memory CD4 T cell: Th1"
+alldat[alldat == "Memory CD4 T-cell Th1/Th17"]<-"Memory CD4 T cell: Th1/Th17"
+alldat[alldat == "Memory CD4 T-cell Th17"]<-"Memory CD4 T cell: Th17"
+alldat[alldat == "Memory CD4 T-cell Th2"]<-"Memory CD4 T cell: Th2"
+alldat[alldat == "naive CD8 T-cell"]<-"Naive CD8 T cell"
+alldat[alldat == "Central memory CD8 T-cell"]<-"Central memory CD8 T cell"
+alldat[alldat == "Effector memory CD8 T-cell"]<-"Effector memory CD8 T cell"
+alldat[alldat == "T-reg"]<-"Regulatory T cells"
+alldat[alldat == "Vd2 gdTCR"]<-"Vδ2 γδTCR"
+alldat[alldat == "Non-Vd2 gdTCR"]<-"Non-δ2 γδTCR"
+
+# create rownames 
+row.names(alldat)<-alldat[,1]
+alldat<-alldat[,-1]
+
+# Rename the columns
+alldat<-alldat %>% 
+  dplyr::rename("Monaco et al. (GEO: GSE107011)"="pTPM_Monaco")%>%
+  dplyr::rename("Uhlén et al. (HPA: www.proteinatlas.org)"="pTPM_HPA")%>%
+  dplyr::rename("Schmiedel et al. (dbGAP: phs001703.v1.p1)"="Schmiedel")
+  
+# reorder the columns
+alldat <- alldat[, c(2, 3, 1)]
+```
+
+# Step 8: Make the heatmap (Figure 4J in preprint)
+
+```{r make heatmaps,  message=FALSE, warning=FALSE}
+# Scale the data
+alldat <- scale(alldat)
+
+myHeatmap <- Heatmap(alldat,
+                     row_names_gp = gpar(fontsize = 6),
+                     column_names_gp = gpar(fontsize = 6),
+                     cluster_rows = F,
+                     cluster_columns =F,
+                     na_col = "grey",
+                     heatmap_legend_param = list(title = "z-score", direction = "horizontal", title_position = "topcenter"))
+
+print(myHeatmap)
+```
+
+# Step 9: Save the plot
+
+```{r save the pdf to google drive, message=FALSE, warning=FALSE }
+cairo_pdf("ComplexHeatmap_FSTL4_expression_blood_cell_populations_55x8.pdf", width = 5.5, height =8)
+print(myHeatmap)
+dev.off()
+```
+

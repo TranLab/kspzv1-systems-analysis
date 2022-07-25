@@ -1,0 +1,496 @@
+---
+title: "PfSPZ correlation chord diagrams (gene level) using postvax non transcriptomic and baseline gene expression"
+author: "Prasida Holla"
+date: "1/20/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objective:
+To make linear correlations between the PfSPZ vaccine baseline transcriptomic data and post-vaccination non-transcriptomic data, the latter of which includes select features from the phenoData, and flow cytometric parameters. The transcriptomic data from RNA-seq is presented as such, and not collapsed into BTMs or other modules.This analysis was done based on reviewers' comments to validate transcription modules that came up as strongly correlated with non-transcriptomic features at a gene level. The correlations are visualized as a chord diagram or circos plot. 
+
+Steps:
+1. Filter and keep select features from non-transcriptomic data (Phil Swanson's FACS data qnd post-vaccination CSP-specific IgG antibody levels- remove cytokine levels)
+2. Load the baseline expression set and filter the phenoData for post-vaccination time point (25 for post-vaccination), and time to parasitemia at 6 months. 
+3. Merge the selected phenoData features with the filtered non-transcriptomic data. We will call this "alldata"
+4. Analyse baseline gene expression data: Filter out low expressing genes and select genes with fraction of highest variation. Add a 'handle' or label to each gene ("_gene") so that gene to gene correlations can be filtered out from the final correlation matrix. 
+5. Run correlations using ggcorrplot- either by merging the "alldata" with the filtered gene expression data using patient ID or loop across the two dataframes. 
+6. The correlation analysis should give a table of Pearson's r values and pvalues for each correlation pair
+7. Convert pvalues to FDR and use it to keep only significant correlations
+8. Keeping only the top triangle of the correlation matrix and remove gene to gene correlations.
+9. Use the package 'circlize' to visualize the correlations as a chord diagram (aka circos plot). 
+10. This script is specifically for baseline gene expression to post-vaccination FACS features.
+
+
+## Load required packages
+```{r load libraries, include = TRUE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tibble)
+library(viridis)
+library(ggpubr)
+library(readxl)
+library(ggcorrplot)
+library(org.Hs.eg.db)
+library(Biobase)
+library(miscTools)
+library(circlize)
+library(RColorBrewer)
+library(doBy)
+library(googledrive)
+library(stats)
+library(data.table)
+library(Cairo)
+library(EDASeq)
+```
+
+# Import baseline and post-vax expression sets, and facs data
+```{r import datasets, include = TRUE, message=FALSE, warning=FALSE}
+#load the baseline expression dataset
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("1Q4VXYxdl9CqtzhcvHA9pn8q06_YOZgi8"), path = temp, overwrite = TRUE)
+esetb <- readRDS(file = dl$local_path)
+
+#load the post-vaccination expression dataset
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("10loQKUl7pQs0qxpDQv1VkCULIL9ZbawZ"), path = temp, overwrite = TRUE)
+esetp <- readRDS(file = dl$local_path)
+
+##import all non-transcriptomic data
+temp <- tempfile(fileext = ".rds")
+dl <- drive_download(
+  as_id("10Uv9gzqZTVtyIqEmYdE9JpJUnJ8ZCPdT"), path = temp, overwrite = TRUE)
+facs <- readRDS(file = dl$local_path)
+```
+
+#Keep only select columns from the phenoData of the post-vaccination EpressionSet (Patient ID,Sample ID, time to parasitemia at six months)
+```{r filter post-vaccination phenoData, include = TRUE, message=FALSE, warning=FALSE}
+positions<-c(1, 2, 3, 8, 12)
+pData(esetp)<-  pData(esetp)%>%
+dplyr::select(positions)
+```
+
+#Keep only select columns from the post-vaccination non-transcriptomic data 
+```{r filter non-transcriptomic data,  include = TRUE, message=FALSE, warning=FALSE}
+
+facs<-facs %>%
+  dplyr::select(!contains("log2 fold-change anti-CSP IgG")) %>%
+  dplyr::select(!contains("FACS_CD3+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_CD3+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD3+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_CD3+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_CD3+CD4+_of_live_lymphocytes")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_CD3+CD4+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD3+CD4+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_CD3+CD4+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_CD3+CD8+_of_live_lymphocytes")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_CD3+CD8+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD3+CD8+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_CD3+CD8+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CD19+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD19+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_Plasmablasts_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_Plasmablasts_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_CSP-specific_memory_B_cells_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CSP-specific_memory_B_cells_of_live_leukocytes")) %>%
+  # dplyr::select(!contains("FACS_CD11c+_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD11c+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CD14+_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD14+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_CD56+CD16+_of_live_lymphocytes")) %>%
+  dplyr::select(!contains("FACS_CD56+CD16+_of_live_PBMCs")) %>%
+  dplyr::select(!contains("FACS_memory_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_naive_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_IgG+_of_memory")) %>%
+  dplyr::select(!contains("FACS_IgM+_of_memory")) %>%
+  dplyr::select(!contains("FACS_IgG-IgM-_of_memory")) %>%
+  #dplyr::select(!contains("FACS_CSP-spec_of_memory_B_cells")) %>%
+  dplyr::select(!contains("FACS_CSP-spec_of_B_cells")) %>%
+  #dplyr::select(!contains("FACS_IgG_of_CSP-spec")) %>%
+  #dplyr::select(!contains("FACS_IgM_of_CSP-spec")) %>%
+  #dplyr::select(!contains("FACS_IgG-IgM-_of_CSP-spec")) %>%
+  dplyr::select(!contains("FACS_PBs_of_memory")) %>%
+  dplyr::select(!contains("FACS_PBs_of_B_cells")) %>%
+  #dplyr::select(!contains("FACS_atypical_memory_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_immature_of_B_cells")) %>%
+  dplyr::select(!contains("FACS_TCRgd")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vd1_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vd1_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vd1_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vd1_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vd1/2-_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vd1/2-_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vd1/2-_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vd1/2-_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vd2_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vd2_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vd2_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vd2_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vg9-_of_Vd2_cells")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vg9-_of_Vd2_cells")) %>%
+  dplyr::select(!contains("FACS_Vg9-Vd2+_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vg9-Vd2+_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vg9-Vd2+_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vg9-Vd2+_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_Vg9+_of_Vd2_cells")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vg9+_of_Vd2_cells")) %>%
+  dplyr::select(!contains("FACS_Vg9+Vd2+_of_T_cells")) %>%
+  #dplyr::select(!contains("FACS_PfSPZ-specific_Vg9+Vd2+_of_T_cells")) %>%
+  dplyr::select(!contains("FACS_Vg9+Vd2+_of_TCRgd")) %>%
+  dplyr::select(!contains("FACS_PfSPZ-specific_Vg9+Vd2+_of_TCRgd")) %>%
+  #dplyr::select(!contains("FACS_CD14+CD16+_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD14+CD16+_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CD14+CD16-_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD14+CD16-_of_live_PBMCs")) %>%
+  #dplyr::select(!contains("FACS_CD14-CD16+_of_live_monocytes")) %>%
+  dplyr::select(!contains("FACS_CD14-CD16+_of_live_PBMCs"))%>%
+  dplyr::select(!contains("CytokineObsConc_CCL2_MCP-1")) %>%
+  dplyr::select(!contains("CytokineObsConc_CCL4_MIP-1_beta")) %>%
+  dplyr::select(!contains("CytokineObsConc_CXCL10_IP-10")) %>%
+  dplyr::select(!contains("CytokineObsConc_GM-CSF")) %>%
+  dplyr::select(!contains("CytokineObsConc_IFN-alpha")) %>%
+  dplyr::select(!contains("CytokineObsConc_IFN-beta")) %>%
+  dplyr::select(!contains("CytokineObsConc_IFN-gamma")) %>%
+  dplyr::select(!contains("CytokineObsConc_IL-1_beta")) %>%
+  dplyr::select(!contains("CytokineObsConc_IL-10")) %>%
+  dplyr::select(!contains("CytokineObsConc_IL-12_p70")) %>%
+  dplyr::select(!contains("CytokineObsConc_IL-2")) %>%
+dplyr::select(!contains("CytokineObsConc_IL-4")) %>%
+dplyr::select(!contains("CytokineObsConc_IL-6")) %>%
+dplyr::select(!contains("CytokineObsConc_IL-8_CXCL8")) %>%
+dplyr::select(!contains("CytokineObsConc_TNF-alpha")) %>%
+dplyr::select(!contains("ICS_IL-1ß_pct_of_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_IL-1ß_Count")) %>%
+  dplyr::select(!contains("ICS_IL-1ß_MFI_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_IL-8_pct_of_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_IL-8_Count")) %>%
+  dplyr::select(!contains("ICS_IL-8_MFI_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_TNF_pct_of_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_CD86_MFI_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_HLA-DR_MFI_live_monocytes"))%>%
+  dplyr::select(!contains("ICS_TNF_MFI_live_monocytes")) %>%
+  dplyr::select(!contains("ICS_TNF_count")) 
+
+#Keep only post-vaccination values
+facs<-facs%>% filter(grepl("_25", PATID.OG))
+```
+
+#Merge non-transcriptomic data 'facs' with the pData of post-vaccination 'esetp'
+```{r merge phenoData with other non-transcriptomic data (FACS),  include = TRUE, message=FALSE, warning=FALSE}
+pheno_data<-pData(esetp)%>%rownames_to_column(., var="PATID.OG")
+#Merge
+alldata<-pheno_data%>%left_join(., facs, by="PATID.OG")
+
+# Remove unwanted columns
+alldata<-alldata[, -c(2:5,7)]
+```
+
+# Process gene expression data at baseline
+```{r gene expression data analysis, include = TRUE, message=FALSE, warning=FALSE}
+# Step 1: Filter gene expression.
+# Remove low level expressors
+e<-counts(esetb)
+# Write a 'selectgenes' function to keep rows (transcripts, genes) that have at least min.count reads in a minimum proportion of samples given by N. By default evaluates to ‘TRUE’ if >=90% (N=0.9 ) of the samples have count-per-million (CPM) above _k_, where _k_ is determined by the default value of min.count=10 and by the sample library. More info on this: https://seqqc.wordpress.com/2020/02/17/removing-low-count-genes-for-rna-seq-downstream-analysis/
+
+selectGenes <- function(counts, min.count=10, N=0.90){
+  lib.size <- colSums(counts)
+  MedianLibSize <- median(lib.size)
+  CPM.Cutoff <- min.count / MedianLibSize*1e6
+  CPM <- edgeR::cpm(counts,lib.size=lib.size)
+ 
+  min.samples <- round(N * ncol(counts))
+ 
+  f1 <- genefilter::kOverA(min.samples, CPM.Cutoff)
+  flist <- genefilter::filterfun(f1)
+  keep <- genefilter::genefilter(CPM, flist)
+ 
+  return(keep)
+}
+
+# and filter your eset
+keep.exprs <- selectGenes(e, min.count=10, N=0.90)
+myFilt <- e[keep.exprs,]
+#dim(myFilt)
+
+# Remove time point T=25
+myFilt<-myFilt[,c(1:244)]
+
+# now keep only highest variance genes:
+
+# Option 1: Filter gene expression based on median absolute deviation filtering:
+
+madsno <- as.integer(nrow(myFilt)/2) # There are ~14.5K genes after filtering out low expressors, we will select the top 50%, alternately select top 1000 genes
+mads <- apply(myFilt, 1, mad)
+e <-myFilt[mads > sort(mads, decr=TRUE)[madsno],]
+
+# Option 2: Filter gene expression based on genefilter. Mostly recommended for microarray data and thresholding is based on absolute intensity cutoffs. However, it works on any matri and cutoffs based on  counts/ cpms for RNA-seq can also be implemented. More info here: https://bioconductor.org/packages/release/bioc/html/genefilter.html and https://support.bioconductor.org/p/72002/
+
+#my_fun <- genefilter::filterfun(pOverA(p = 0.4, A = 100), cv(a = 0.7, b = 10))
+#my_filter <- genefilter(2^myFilt, my_fun)
+#e- myFilt[my_filter,]
+
+
+# Scale data
+e<- e %>%
+t(.) %>%
+scale(., center = TRUE, scale = TRUE) %>%
+t(.)
+
+# ENSEMBLIDs to gene names
+symbols <- mapIds(org.Hs.eg.db,
+keys=row.names(e),
+column="SYMBOL",
+keytype="ENSEMBL",
+multiVals="first")
+expr_data<-merge(e, symbols, by=0)
+expr_data<-expr_data[,-1]
+ncol(expr_data)
+expr_data<-expr_data[!duplicated(expr_data$y),]
+expr_data<-expr_data[!is.na(expr_data$y),] ## or you can run --> expr_data<-subset(expr_data, !is.na(expr_data$y))
+rownames(expr_data)<-(expr_data[,245])
+expr_data<-expr_data[,-245]
+
+# Clean up and transpose
+gene_data<-data.frame(expr_data)%>%rownames_to_column(., var = "Genes")
+gene_data<-t(gene_data) 
+colnames(gene_data) <- gene_data[1,]
+gene_data<-gene_data[-1,]
+gene_data<-data.frame(gene_data)%>%rownames_to_column(., var="PATID.OG")
+
+#Change all the scores in the expr_data from 'factor' to 'numeric'
+# Note: This changes the PATID.OG column to numeric as well and fills it in with NAs. Merge the PATID.OGs from expr_data (above) to the new dataframe by assigning the numeric dataframe a new name, 'gene_data'
+indx <- sapply(gene_data, is.character)
+gene_data[indx] <- lapply(gene_data[indx], function(x) as.numeric(as.character(x)))
+gene_data<-gene_data[, -1]
+e<-t(expr_data)
+e<-as.data.frame(e)%>%rownames_to_column(., var="PATID.OG")
+gene_data$`PATID.OG`<-e[,1]
+gene_data <- gene_data %>%
+  dplyr::select("PATID.OG", everything())
+```
+
+# Add "Gene_" to each of the gene names (to filter out gene to gene correlatiosn later)
+```{r add a label to filter out gene to gene correlations, include = TRUE, message=FALSE, warning=FALSE}
+colnames(gene_data)<-paste(colnames(gene_data), "_Gene")
+gene_data<-gene_data%>%dplyr::rename(., "PATID.OG"="PATID.OG _Gene")
+```
+
+# For convenience, change patient_ids in the non-transcriptomic 'alldata' from time '_25' to time '_0'
+```{r make patient IDs similar for merging}
+alldata<-alldata%>%dplyr::mutate(., "PATID.OG"=str_replace(PATID.OG, '_.*', "_0"))
+```
+
+# Keep the same Patient_ids in baseline gene expression data and post-vaccination non-transcriptomic data
+```{r keep same Patient_IDs in the two dataframes, include = TRUE, message=FALSE, warning=FALSE}
+gene_data<-gene_data%>% filter(., PATID.OG %in% alldata$PATID.OG)
+nrow(gene_data)
+alldata<-alldata%>% filter(., PATID.OG %in% gene_data$PATID.OG)
+nrow(alldata)
+```
+
+###################################################
+# Option I: Loop across the two sepearte dataframes
+###################################################
+
+```{r SKIP if you use Option 2, include = TRUE, message=FALSE, warning=FALSE}
+#Spe 1: Trim to remove PATID.OGs
+#gene_data<-gene_data[,-1]
+#alldata<-alldata[,-1]
+
+# For help : https://stackoverflow.com/questions/67692320/nested-loop-in-r-to-correlate-columns-of-df1-to-columns-of-df2
+
+# Step 2: Get rho values
+#r <- matrix(NA, nrow = ncol(gene_data), ncol=ncol(alldata))
+#for (i in 1:ncol(gene_data)) {
+#for (j in 1:ncol(alldata)) {
+#r[i, j] <- cor.test(gene_data[,i], alldata[,j], method = "spearman")$estimate
+#}
+#}
+
+# Get pvalues
+#p <- matrix(NA, nrow = ncol(gene_data), ncol=ncol(alldata))
+#for (i in 1:ncol(gene_data)) {
+#for (j in 1:ncol(alldata)) {
+#p[i, j] <- cor.test(gene_data[,i], alldata[,j], method = "spearman")$p.value
+#}
+#}
+
+# Re-assign names to rows and columns
+#rownames(r)<-colnames(gene_data)
+#colnames(r)<-colnames(alldata)
+
+#rownames(p)<-colnames(gene_data)
+#colnames(p)<-colnames(alldata)
+```
+
+#######################################################
+## Option II: Correlating within the same merged matrix
+#######################################################
+```{r merge the two dataframe for running correlations, include = TRUE, message=FALSE, warning=FALSE}
+# Merge the gene_data with alldata
+big<-alldata%>%
+left_join(., gene_data,  by="PATID.OG")
+big<-big[,-1]
+
+# Rename columns for convenience
+big<-big %>%
+  dplyr::rename("Outcome" = "tte.mal.atp.6") %>%
+  dplyr::rename("PfSPZ stimulated CD4+ T cells" = "FACS_PfSPZ-specific_CD3+CD4+_of_live_lymphocytes")%>%
+  dplyr::rename( "PfSPZ stimulated CD8+ T cells"= "FACS_PfSPZ-specific_CD3+CD8+_of_live_lymphocytes")%>%
+  dplyr::rename("CD19+ B cells" = "FACS_CD19+_of_live_lymphocytes")%>%
+  dplyr::rename("FACS Plasmablasts" = "FACS_Plasmablasts_of_live_lymphocytes")%>%
+  dplyr::rename("CD11c+ monocytes" = "FACS_CD11c+_of_live_monocytes")%>%
+  dplyr::rename("CD14+ monocytes" = "FACS_CD14+_of_live_monocytes")%>%
+  dplyr::rename("CSP specific of memory B cells" = "FACS_CSP-spec_of_memory_B_cells")%>%
+  dplyr::rename("IgG+ of CSP specific B cells" = "FACS_IgG_of_CSP-spec")%>%
+  dplyr::rename("IgM+ of CSP specific B cells" = "FACS_IgM_of_CSP-spec")%>%
+  dplyr::rename("IgG-IgM- of CSP specific B cells"= "FACS_IgG-IgM-_of_CSP-spec")%>%
+  dplyr::rename("Atypical memory of B cells" = "FACS_atypical_memory_of_B_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ1 of T cells"  = "FACS_PfSPZ-specific_Vd1_of_T_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ1/2 of T cells"  = "FACS_PfSPZ-specific_Vd1/2-_of_T_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ9-Vδ2+ of T cells"  = "FACS_PfSPZ-specific_Vg9-Vd2+_of_T_cells")%>%
+  dplyr::rename("PfSPZ stimulated Vδ9+Vδ2+ of T cells"  = "FACS_PfSPZ-specific_Vg9+Vd2+_of_T_cells")%>%
+  dplyr::rename("CD14+CD16+ of monocytes"  = "FACS_CD14+CD16+_of_live_monocytes")%>%
+  dplyr::rename("CD14+CD16- of monocytes"  = "FACS_CD14+CD16-_of_live_monocytes")%>%
+  dplyr::rename("CD14-CD16+ of monocytes"  = "FACS_CD14-CD16+_of_live_monocytes")%>%
+  dplyr::rename("Postvax anti-CSP IgG"  = "anti-CSP IgG")
+```
+
+# Run the correlations and make cutoffs
+```{r run correlations, include = TRUE, message=FALSE, warning=FALSE}
+cor_btm<-cor(na.omit(big), use = "pairwise.complete.obs")
+# Create a p value matrix
+p.mat_btm<-cor_pmat(na.omit(big), use="pairwise.complete.obs")
+# Convert p values to False Discovery Rates
+p.mat_btm[]<-p.adjust(p.mat_btm, method = 'BH' )
+p.mat_btm[lower.tri(p.mat_btm, diag=TRUE)] <- NA   #use adjusted P values
+p.mat_btm <- pmax(p.mat_btm, t(p.mat_btm), na.rm=TRUE)
+fdr <- 0.001
+d_sig_btm  <- which(p.mat_btm <fdr, arr.ind = T)
+foo_cor_btm <- cor_btm[unique(d_sig_btm[,1]),unique(d_sig_btm[,2])]  #get row and columns that include significant values
+foo_pval_btm <- p.mat_btm[unique(d_sig_btm[,1]),unique(d_sig_btm[,2])]  #get row and columns that include significant values
+foo_cor_btm[foo_pval_btm>=fdr] <- 0                                 #for cor values not signficant, make 0
+foo_cor_btm[foo_cor_btm>0.999999] <- 0                                 #for cor values that are
+```
+
+# Remove gene to gene correlations and remove negative correlations
+```{r remove gene to gene correlations, include = TRUE, message=FALSE, warning=FALSE}
+indx_col <- grepl('Gene', colnames(foo_cor_btm))
+indx_row <- grepl('Gene', rownames(foo_cor_btm))
+foo_cor_btm[indx_row, indx_col]<-0
+foo_cor_btm[foo_cor_btm<0] <- 0
+foo_cor_btm[foo_cor_btm == 0] <- NA
+```
+
+# Create sectors for the chord diagram: Note: this part runs into errors and sectors are not created
+# Error message: "chr` contains index that does not beling to available sectors"
+```{r create sector labels for chord diagram, include = TRUE, message=FALSE, warning=FALSE}
+combo3_btm<-as.data.frame(foo_cor_btm)
+combo3_btm$Data.Type <- "Gene Expression"
+combo3_btm$Data.Type <- ifelse(grepl("Outcome", rownames(combo3_btm)), "Outcome", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PfSPZ stimulated CD4\\+ T cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PfSPZ stimulated CD8\\+ T cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CD19\\+ B cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("FACS Plasmablasts", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CD11c\\+ monocytes", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CD14\\+ monocytes", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CSP specific of memory B cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("IgM\\+ of CSP specific B cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("IgG\\+ of CSP specific B cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("IgG\\-IgM\\- of CSP specific B cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("Atypical memory of B cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ1 of T cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ1/2 of T cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ9\\-Vδ2\\+ of T cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("PfSPZ stimulated Vδ9\\+Vδ2\\+ of T cells", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CD14\\+CD16\\+ of monocytes", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CD14\\+CD16\\- of monocytes", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("CD14\\-CD16\\+ of monocytes", rownames(combo3_btm)), "Cellular expression", combo3_btm$Data.Type) 
+combo3_btm$Data.Type <- ifelse(grepl("Postvax anti-CSP IgG", rownames(combo3_btm)), "Outcome", combo3_btm$Data.Type)
+
+
+set.seed(12)
+df1_btm <- data.frame(variable = as.character(rownames(combo3_btm)), Group1 = combo3_btm$Data.Type)
+gl1_btm <- split(df1_btm$variable, df1_btm$Group1, drop = FALSE)
+gl1_btm <- sapply(gl1_btm, as.character)
+group_color1_btm <- structure(circlize::rand_color(length(gl1_btm),hue = "monochrome", transparency = 0.5, luminosity = "dark"), names = names(gl1_btm))
+n_group1_btm <-  length(gl1_btm)
+
+## to get CSP-specific IgG, outcome and dose together
+combo3_btm<-combo3_btm %>% arrange(factor(Data.Type, levels = c("Outcome","Cellular expression", "Gene Expression"))) 
+
+combo4_btm <- combo3_btm[,intersect(rownames(combo3_btm), colnames(combo3_btm))]
+
+
+combo4_btm[upper.tri(combo4_btm)] <- 0  
+combo4_btm[combo4_btm<0] <- 0
+combo4_btm[combo4_btm == 0] <- NA
+```
+
+# Make the chord diagram
+# Note; Highlight sectors and relabeling of gene names was done in AI
+```{r make chord diagram, include = TRUE, message=FALSE, warning=FALSE}
+mat_btm <- as.matrix(combo4_btm)
+order_btm<-colnames(mat_btm)
+col_fun_btm <- colorRamp2(c( 0, 1), c( "white", "darkblue"), transparency = 0.5)
+
+#cairo_pdf("~/Desktop/Baseline_GE_to_post_vax_chord.pdf", height = 6, width = 6)
+circos.par(canvas.xlim = c(-1.8,1.8), canvas.ylim = c(-1.8,1.8), points.overflow.warning=FALSE,
+track.margin = c(0.01, 0.05), # adjust bottom and top margin
+track.height = 0.05,  gap.degree =4)
+chordDiagram(mat_btm, order=order_btm, col = col_fun_btm(mat_btm), annotationTrack = NULL, link.largest.ontop = TRUE, preAllocateTracks = list(track.height = 0.1), transparency = 0.25, self.link = 1)
+circos.trackPlotRegion(track.index = 1, panel.fun = function(x, y) {
+xlim = get.cell.meta.data("xlim")
+ylim = get.cell.meta.data("ylim")
+sector.name = get.cell.meta.data("sector.index")
+circos.text(mean(xlim), ylim[1] + 1, sector.name, facing = "clockwise", niceFacing = TRUE, adj = c(0, 0), cex = 0.7) #text for parameters
+circos.axis(h = "top", labels.cex = 0.3, major.tick = FALSE, sector.index = sector.name, track.index = 1, labels = FALSE)
+}, bg.border = NA)
+#highlight.sector(rownames(mat_btm)[which(combo3_btm$Data.Type == "Gene Expression")],
+#                 track.index = get.all.track.index(), col = "cyan",
+#                 text = "Gene Expression", cex = 0.8, text.col = "black", niceFacing = T)
+#highlight.sector(rownames(combo3_btm)[which(combo3_btm$Data.Type == "Outcome")],
+#                 track.index = get.all.track.index(), col = "grey",
+#                 text = "Outcome", cex = 0.8, text.col = "black", niceFacing = TRUE)
+# Cellular Expression 
+#highlight.sector(rownames(combo3_btm)[which(combo3_btm$Data.Type == "Cellular expression")],
+#                 track.index = get.all.track.index(), col = "green",
+#                 text = "Cellular Expression", cex = 0.8, text.col = "pink", niceFacing = TRUE)
+circos.clear()
+```
+
+# Testing individual comparisons
+```{r create scatter plot for each pairwise-correlation shown in the chord diagram, include = TRUE, message=FALSE, warning=FALSE}
+# Keep only the comparisons that were not NA
+x<-which(!is.na(mat_btm), arr.ind = T)
+for_scatters<-mat_btm[unique(x[,1]), unique(x[,2])]
+
+# Create a fuction to plot all pairs of scatterplots at once
+rows<-set_names(rownames(for_scatters))
+cols<-set_names(colnames(for_scatters))
+
+scatter_fun = function(x, y) {
+   ggplot(big, aes(x = .data[[x]], y = .data[[y]]) )+
+        geom_point(alpha=0.1)+
+        theme()+
+          geom_hline(yintercept = 0, linetype="dashed")+
+          geom_vline(xintercept = 0, linetype="dashed")+
+        stat_cor(mapping = NULL, data = NULL, method = "pearson", label.sep = ", ", label.x.npc = "left", label.y.npc = "top", label.x = NULL, label.y = NULL, output.type = "expression", geom = "text", position = "identity", na.rm = FALSE, show.legend = NA, inherit.aes = TRUE)+
+    geom_smooth(method = "loess", se = FALSE, color = "grey74")
+}
+
+# Example
+scatter_fun("Outcome", "M6PR _Gene")
+
+# Plot all together
+all_plots <-map(rows, ~map(cols, scatter_fun, y = .x) )
+
+cairo_pdf("~/Desktop/scatterPlots.pdf")
+all_plots
+dev.off()
+```
