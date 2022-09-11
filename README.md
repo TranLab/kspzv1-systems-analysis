@@ -44,6 +44,9 @@ Code for systems analysis of KSPZV1 malaria vaccine trial.
 
 [Gene-level Correlations, Δ (post-vax/baseline) (NEW)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-gene-level-correlations-to-postvax-data-Fig-S6-06012022.html)
 
+
+[Machine Learning Class Predicton, Pre-immunization baseline, 1.8x10^6 PfSPZ (REVISED)](https://github.com/TranLab/kspzv1-systems-analysis/blob/main/html/KSPZV1-Xgboost-Multimodal-Model-LS-Revised.html)
+
 ## Other
 
 [FSTL4 heatmap from other datasets (NEW)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-FSTL4-heatmap-from-other-datasets-06012022.html)
