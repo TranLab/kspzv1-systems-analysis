@@ -1,0 +1,118 @@
+---
+title: "KSPZV1 Table S6"
+author: "Tuan M. Tran"
+date: '2022-08-02'
+output: html_document
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+```
+
+## Objective
+
+Plot validation error vs cross-validation error
+
+```{r read in data}
+mydat <- readxl::read_excel("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Leetah Med Revisions/Updated Items/High Dose Combinations table.xlsx")
+
+mypath <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Leetah Med Revisions/Updated Items/Supplemental Features CV errors.xlsx"
+alldat <- mypath %>%
+  excel_sheets() %>%
+  set_names() %>% 
+  map_df(~ read_excel(path = mypath, sheet = .x), .id = "sheet") %>%
+  rename(features = "Features")
+```
+
+## Filter data
+
+```{r view, echo=TRUE}
+alldat$index <- 1:nrow(alldat)
+alldat %>%
+  filter(!grepl("TBA", features)) %>%
+  filter(`Validation Error`<0.15 & `Best CV Error`<0.15) %>%
+  dplyr::select(-c(Parameters)) %>%
+  knitr::kable()
+```
+
+```{r plot data, fig.align='center', fig.width=10, fig.height=10}
+alldat %>%
+  filter(!grepl("TBA", features)) %>%
+  ggplot(aes(x= `Validation Error`, y = `Best CV Error`, label = index)) +
+  geom_point() +
+  geom_label() +
+  facet_wrap(~sheet)
+```
+```{r test}
+# alldat %>%
+#   filter(grepl("CD14", features) & grepl("spliceosome", features) & grepl("antigen presentation", features)) %>%
+#   dplyr::select(-c(Parameters, Seed)) %>%
+#   View()
+```
+
+### Minimize CV error and validation error by sheet
+
+```{r minimize error by sheet}
+alldat <- alldat %>%
+  mutate(avg_error = (`Validation Error`+`Best CV Error`)/2) %>%
+  group_by(sheet) %>%
+  mutate(min_error_for_time_group = min(avg_error, na.rm = TRUE)) %>%
+  mutate(is_min_error_for_time_group =
+           ifelse(as.character(signif(avg_error)) == as.character(signif(min_error_for_time_group)), "*","")) %>%
+  ungroup() %>%
+  rename(time_group_model = `sheet`) %>%
+  mutate(time_group_model = ifelse(time_group_model == "Baseline 1.8e6",
+                                   "baseline 1.8x10^6 PfSPZ multi-modal",
+                                   time_group_model)) %>%
+  mutate(time_group_model = ifelse(time_group_model == "Delta 1.8e6",
+                                   "delta 1.8x10^6 PfSPZ multi-modal",
+                                   time_group_model)) %>%
+  mutate(time_group_model = ifelse(time_group_model == "Post-Vaccination 1.8e6",
+                                   "post-vax 1.8x10^6 PfSPZ multi-modal",
+                                   time_group_model)) %>%
+  mutate(time_group_model = ifelse(time_group_model == "Baseline 1.8e6 BTMs",
+                                   "baseline 1.8x10^6 PfSPZ BTMs only",
+                                   time_group_model)) %>%
+  dplyr::select(index, everything())
+
+summary(factor(alldat$time_group_model))
+```
+
+### Read in Feature Counts from Models
+
+```{r read in feature counts from models}
+mypath2 <- "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Supplemental Table 6A LCS TMT counts only.xlsx"
+
+featurecountdat <- mypath2 %>%
+  excel_sheets() %>%
+  set_names() %>% 
+  map_df(~ read_excel(path = mypath2, sheet = .x), .id = "time_group_model") %>%
+  rename(feature = `Feature`) %>%
+  rename(counts_in_50_iterations = `Counts out of 50 iterations`) %>%
+  mutate(time_group_model = ifelse(time_group_model == "Placebo Counts",
+                                   "baseline placebo multi-modal",
+                                   time_group_model)) %>%
+  mutate(time_group_model = ifelse(time_group_model == "Baseline Multi Counts",
+                                   "baseline 1.8x10^6 PfSPZ multi-modal",
+                                   time_group_model)) %>%
+  mutate(time_group_model = ifelse(time_group_model == "Delta Multi Counts",
+                                   "delta 1.8x10^6 PfSPZ multi-modal",
+                                   time_group_model)) %>%
+  mutate(time_group_model = ifelse(time_group_model == "Post Multi Counts",
+                                   "post-vax 1.8x10^6 PfSPZ multi-modal",
+                                   time_group_model)) %>%
+  mutate(time_group_model = ifelse(time_group_model == "Baseline BTMs Counts",
+                                   "baseline 1.8x10^6 PfSPZ BTMs only",
+                                   time_group_model))
+
+summary(factor(featurecountdat$time_group_model))
+```
+
+### Write to one excel file
+
+```{r write to excel file}
+writexl::write_xlsx(x = list(feature_counts = featurecountdat, model_errors = alldat), path = "/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Med Revised Submission 2022/Supplementary Tables/Supplemental Table 6A long format TMT.xlsx")
+```

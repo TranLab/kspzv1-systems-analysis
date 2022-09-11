@@ -200,11 +200,59 @@ The data must be standardized (i.e., scaled) to make variables comparable. Recal
 
 ```{r optimal clusters Elbow, echo=FALSE, message=FALSE, warning=FALSE}
 library(factoextra)
-# Elbow method
-fviz_nbclust(t(exprs(x)), cluster::pam, method = "wss") +
-    geom_vline(xintercept = 4, linetype = 2)+
-  labs(subtitle = "Elbow method")
+# gap_stat
+# fviz_nbclust(t(exprs(x)), FUNcluster = cluster::pam, method = "gap_stat") +
+#   theme_minimal() +
+#   ggtitle("The gap_stat Plot")
+# wss
+# fviz_nbclust(t(exprs(x)), FUNcluster = cluster::pam, method = "wss") +
+#   theme_minimal() +
+#   ggtitle("The wss Plot")
+# silhouette
+high_dose_x <- x[,which(x$treat=="1.8 x 10^6 PfSPZ")]
+fviz_nbclust(t(exprs(high_dose_x)), FUNcluster = cluster::pam, method = "silhouette") +
+  theme_minimal() +
+  ggtitle("The silhouette Plot")
+
+placebo_x <- x[,which(x$treat=="Placebo")]
+fviz_nbclust(t(exprs(placebo_x)), FUNcluster = cluster::pam, method = "silhouette") +
+  theme_minimal() +
+  ggtitle("The silhouette Plot")
+
+low_dose_x <- x[,which(x$treat=="4.5 x 10^5 PfSPZ")]
+fviz_nbclust(t(exprs(low_dose_x)), FUNcluster = cluster::pam, method = "silhouette") +
+  theme_minimal() +
+  ggtitle("The silhouette Plot")
+
+med_dose_x <- x[,which(x$treat=="9.0 x 10^5 PfSPZ")]
+fviz_nbclust(t(exprs(med_dose_x)), FUNcluster = cluster::pam, method = "silhouette") +
+  theme_minimal() +
+  ggtitle("The silhouette Plot")
 ```
+
+https://www.r-bloggers.com/2019/01/10-tips-for-choosing-the-optimal-number-of-clusters/
+
+```{r clValid}
+library(clValid)
+# intern <- clValid(t(exprs(x)), nClust = 2:10, 
+#               clMethods = c("pam"), validation = "internal")
+# Summary
+# summary(intern) %>% knitr::kable() %>% kableExtra::kable_styling()
+```
+
+https://www.datanovia.com/en/lessons/determining-the-optimal-number-of-clusters-3-must-know-methods/
+
+```{r recluster}
+library(factoextra)
+library(NbClust)
+
+
+# res.nbclust <- NbClust(data = t(exprs(x)), diss = NULL, distance = "euclidean",
+#                        min.nc = 2, max.nc = 10, method = "kmeans", index = "all")
+```
+
+According to the majority rule, the best number of clusters is  2 
+
 
 ## Clustering and Distance options
 
@@ -236,26 +284,25 @@ if(row.hclust.method != "kmeans" & row.hclust.method != "pam"){
 }
 ```
 
-## Determin Optimal number of clusters 
+## Determine Optimal number of clusters 
 
 https://rdrr.io/cran/ClusterR/man/Optimal_Clusters_Medoids.html
 
 ```{r optimal number of clusters, echo = FALSE}
-# library(ClusterR)
-# Optimal_Clusters_Medoids(
-#   t(exprs(x)),
-#   10,
-#   col.dist.method,
-#   criterion = "silhouette",
-#   clara_samples = 0,
-#   clara_sample_size = 0,
-#   minkowski_p = 1,
-#   swap_phase = TRUE,
-#   threads = 8,
-#   verbose = FALSE,
-#   plot_clusters = TRUE,
-#   seed = 1
-# )
+library(ClusterR)
+Optimal_Clusters_Medoids(
+  t(exprs(x)),
+  max_clusters = 10,
+  distance_metric = col.dist.method,
+  criterion = "silhouette",
+  clara_samples = 0,
+  clara_sample_size = 0,
+  minkowski_p = 1,
+  swap_phase = TRUE,
+  threads = 8,
+  verbose = FALSE,
+  plot_clusters = TRUE,
+  seed = 1)
 ```
 
 ## Generate ComplexHeatmap object and then output to PDF
@@ -307,9 +354,48 @@ if(ClusterCols == TRUE){
 #set dimensions
 myheight <- 10
 mywidth <- 16
-cairo_pdf(paste0(figdir, "Fig1C Revised Heatmap", " height", myheight, " width", mywidth, ".pdf"), height = myheight, width = mywidth)
+cairo_pdf(paste0(figdir, "Fig1C Revised Heatmap", " height", myheight, " width", mywidth, " pam 2 clusters.pdf"), height = myheight, width = mywidth)
 print(hm)
 dev.off
+```
+
+```{r evaluate clustering, eval == FALSE}
+foo_clust <- pData(x) %>%
+  rownames_to_column(var = "rowname") %>%
+  left_join(., pa.col$clustering %>%
+              tibble::enframe() %>%
+              dplyr::rename(rowname = "name", cluster = "value"),
+            by = "rowname") %>%
+  column_to_rownames(var = "rowname") %>%
+  mutate(Outcome = factor(ifelse(mal.atp.3 == 0, "P", "NP")))
+            
+foo_clust_highdose <- foo_clust %>%
+  filter(treat == "1.8 x 10^6 PfSPZ") %>%
+  mutate(clust2 = ifelse(cluster == 1, "1", "2-4"))
+mytab <- table(foo_clust_highdose$Outcome, foo_clust_highdose$clust2)
+mytab
+fisher.test(mytab)
+
+foo_clust_placebo<- foo_clust %>%
+  filter(treat == "Placebo") %>%
+  mutate(clust2 = ifelse(cluster == 1, "1", "2-4"))
+mytab <- table(foo_clust_placebo$Outcome, foo_clust_placebo$clust2)
+mytab
+fisher.test(mytab)
+
+foo_clust_lowdose <- foo_clust %>%
+  filter(treat == "4.5 x 10^5 PfSPZ") %>%
+  mutate(clust2 = ifelse(cluster == 1, "1", "2-4"))
+mytab <- table(foo_clust_lowdose$Outcome, foo_clust_lowdose$clust2)
+mytab
+fisher.test(mytab)
+
+foo_clust_meddose <- foo_clust %>%
+  filter(treat == "9.0 x 10^5 PfSPZ") %>%
+  mutate(clust2 = ifelse(cluster == 1, "1", "2-4"))
+mytab <- table(foo_clust_meddose$Outcome, foo_clust_meddose$clust2)
+mytab
+fisher.test(mytab)
 ```
 
 ## Extract clustering information

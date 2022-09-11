@@ -1,0 +1,753 @@
+---
+title: "KSPZV1 Machine Learning Pre-Immunization Baseline"
+author: "Leetah Senkpeil"
+date: "7/3/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(openxlsx)
+library(xgboost)
+library(dplyr)
+library(tidyverse)
+library(fgsea)
+library(glmnet)
+library(pROC)
+library(aod)
+library(caret)
+library(limma)
+library(caTools)
+library(e1071)
+library(robustbase)
+library(combinat)
+library(googledrive)
+library(missMDA)
+
+```
+
+```{r load data, include=FALSE, message=FALSE,}
+#load expression set and gene sets
+
+temp <- tempfile(fileext = ".rds")
+
+dl <- drive_download(as_id("1TQRNC3myZCnFd9xo4KFIHlTIsciDF73v"), path = temp, overwrite = TRUE)
+pfspz_cpm_SM6 <- readRDS(file = dl$local_path)
+
+btms <- drive_download(as_id("1WnjJH07oOLfRfu4dZGj2QVBaDDh70cNm"), path = temp, overwrite = TRUE)
+lowBTMs <- readRDS(file = btms$local_path)
+
+facs <- drive_download(as_id("1IOejdAAyWQwHpteP5YvOtW_Ym_6wX_su"), path = temp, overwrite = TRUE)
+pfspz_facs <- readRDS(file = facs$local_path)
+
+
+#remove temp variables
+rm(btms)
+rm(dl)
+rm(facs)
+```
+
+Calculate module expression scores of modules interest
+```{r MES, echo=FALSE, message=FALSE}
+#calculate module expression scores from log CPM expression values
+
+#set options for reducing expression set
+#myBatch <- "Aug"#select for batch if desired
+myDoseGroup <- c("1.8 x 10^6 PfSPZ")#highest dose group as group of interest
+pfspz <- pfspz_cpm_SM6[,pfspz_cpm_SM6$treat %in% myDoseGroup]
+
+#scale data
+a <- exprs(pfspz) <- t(scale(t(exprs(pfspz)), center = TRUE, scale = TRUE)) #generating z scores using scale function
+rownames(a) <- fData(pfspz)$GeneSymbol#set rownames as corresponding Gene Symbols
+
+#take out genes in each module from complete expression data frame
+annot.btm <- as.data.frame(unlist(names(lowBTMs)))
+mes <- c()#initialize variable for calculated module expression scores
+
+#loop to calculate a module expression score for each module in lowBTMs list for each subject in the expression set
+for( i in 1:length(lowBTMs)){
+  mes[[i]] <- colMedians(matrix(a[intersect(unique(gsub(" ", "",lowBTMs[[i]])),rownames(a)),], ncol = ncol(pfspz)), na.rm = TRUE)
+  names(mes[[i]]) <- colnames(exprs(pfspz))
+}
+
+#combine computed values with eset data
+names(mes) <- names(lowBTMs)#name the module expression scores with corresponding lowBTM module name
+mes.df <- do.call("rbind", mes)#create df from named list
+mes.df.annot <- merge(annot.btm, mes.df, by.x=1, by.y=0)#merge to include all eset data, remove BTMs that were not represented
+mes.df.annot <- na.omit(mes.df.annot)#remove samples with NA values for BTMs
+
+#df has numbers as rownames after merge so can't use col_to_rownames
+rownames(mes.df.annot) <- mes.df.annot[,1]#set rownames as BTM module names
+mes.df.annot <- mes.df.annot[,-1]#remove first column after creating rownames
+
+```
+
+Combine MES and other data for feature selection and impute missing data
+```{r combine all features, message=FALSE}
+
+#order columns like mes.df.annot
+mes.temp <- mes.df.annot
+subj <- colnames(mes.temp)#var with PATIDs from mes.df.annot colnames
+ind <- which(pfspz_facs$PATID.OG %in% subj)#find which ind of mes.df.annot correspond with PATID
+facs.temp <- as.data.frame(pfspz_facs[ind,])#reduce facs data to only samples of interest with PATIDs in eset
+rownames(facs.temp) <- facs.temp$PATID.OG#set rownames as PATIDs with timepoint suffix to match colnames of mes.df.annot
+facs.temp <- t(facs.temp[,-c(1)])#transpose facs df and remove 
+facs.temp <- facs.temp[,order(colnames(facs.temp))]
+mes.temp <- mes.temp[,order(colnames(mes.temp))]
+
+mes.temp <- rbind(facs.temp,mes.temp)
+
+#imputation of missing features
+mes2 <- t(mes.temp)
+inds <- which(rowSums(is.na(mes2)) > nrow(mes2)/2)
+
+if(length(inds) > 0){
+  mes_imp <- mes2[-inds,]
+} else {mes_imp <- mes2}
+
+cn <- colnames(mes_imp)
+mes_imp <- t(mes_imp)
+imp <- MIPCA(mes_imp)
+mes_imputed <- imp$res.imputePCA
+mes.df.annot <- mes_imputed
+
+```
+
+
+```{r recursive feature elimination, echo = TRUE, eval = FALSE, message=FALSE}
+
+model_df <- t(mes.df.annot)#create data frame with potential features and all samples
+outcome <- as.data.frame(pfspz[,which(pfspz$SAMPLEID %in% rownames(model_df))]$mal.atp.3)#get outcomes for samples in model_df
+rownames(outcome) <- pfspz[,which(pfspz$SAMPLEID %in% rownames(model_df))]$SAMPLEID#PATIDs as rownames to match model_df
+colnames(outcome) <- "Outcome3mos"
+
+#create randomized train and test sets (seed saved for reproducibility)
+set.seed(0623)
+temp <- dplyr::sample_n(as.data.frame(model_df), (nrow(model_df)*(2/3)))
+indices <- which(rownames(model_df) %in% rownames(temp))#save indices for train set and harmonization downstream
+
+#create train and test sets with corresponding outcome factor lists for feature selection and future reference
+model_df_tr <- data.frame(model_df[indices,])#train set
+outcome_tr <- outcome[indices,]
+model_df_t <- data.frame(model_df[-indices,])#test set
+outcome_t <- outcome[-indices,]
+
+#initialize lists to save feature selection results
+featlist <- list()
+feat_seeds <- list()
+seed_list <- list()
+list_param <- list()
+error_list <- list()
+cvci <- list()
+frame <- as.data.frame(NA)
+
+#Looping to train best parameters for feature combinations
+temp.seed <- sample.int(10000,1)[[1]]#randomize initial seed for loop 
+
+for (i in 1:50) {
+    feats <- rfe(model_df_tr, outcome_tr, sizes = 3:5, metric = 'Accuracy', maximize = TRUE, rfeControl = rfeControl())
+ 
+    best_param <- list()
+    best_seednumber = temp.seed
+    best_error = Inf
+ 
+    mes_df <- mes.df.annot
+    if(length(feats$optVariables) >= 4){
+        model_ind <- c(grep(feats$optVariables[1], rownames(mes_df)),grep(feats$optVariables[2], pattern =
+        rownames(mes_df)),grep(feats$optVariables[3],  rownames(mes_df)),grep(feats$optVariables[4], rownames(mes_df)))}
+      else if(length(feats$optVariables) == 3){
+        model_ind <- c(grep(feats$optVariables[1], rownames(mes_df)),grep(feats$optVariables[2],                                         rownames(mes_df)),grep(feats$optVariables[3],rownames(mes_df)))
+      }
+
+
+    model_df <- as.data.frame(t(mes_df[model_ind,]))
+ 
+    pfspz_train <- pfspz_cpm_SM6[,pfspz_cpm_SM6$SAMPLEID %in% rownames(model_df)]
+    outcome <- as.data.frame(pfspz_train$mal.atp.3)
+    rownames(outcome) <- pfspz_train$SAMPLEID
+    colnames(outcome) <- "Outcome3mos"
+    
+    #check that outcome and model_df are in the same order
+    model_df$SubjID <- rownames(model_df)
+    outcome$SubjID <- rownames(outcome)
+    length(match(rownames(outcome), rownames(model_df)))
+    model_df <- left_join(model_df, outcome)
+    model_df$Outcome3mos <- gsub("never_infected", 0, model_df$Outcome3mos)
+    model_df$Outcome3mos <- gsub("infected", 1, model_df$Outcome3mos)
+    rownames(model_df) <- model_df$SubjID
+    model_df <- model_df[,-which(colnames(model_df) == "SubjID")] #Removing SubjID
+
+    #create training and test sets
+    train_df <- model_df[indices,]
+    train.rows <- rownames(train_df)
+    test_df <- model_df[-indices,]
+    test.rows <- rownames(test_df)
+   
+    train <- matrix(as.numeric(as.character(unlist(train_df))), ncol = ncol(train_df))
+    colnames(train) <- colnames(train_df)
+    test <- matrix(as.numeric(unlist(test_df)), ncol = ncol(test_df))
+    colnames(test) <-  colnames(test_df)
+    all <- matrix(as.numeric(unlist(model_df)), ncol = ncol(model_df))
+    colnames(all) <-  colnames(model_df)
+
+    #build xgboost datasets
+    d.train <- xgb.DMatrix(data = train[,-ncol(train)], label = (train[,ncol(train)]))#
+    d.test <- xgb.DMatrix(data = test[,-ncol(test)], label = (test[,ncol(test)]))#indices need to match training
+
+  
+  for (iter in 1:1000) {
+    print(glue::glue("Curr Iter: ", iter, " Best Error: ", best_error))
+    param <- list(objective = 'binary:logistic',
+                  max_depth = sample(2:15,1),
+                  eta = runif(1, 0.01, 0.5),
+                  gamma = sample(c(0, 0.1, 0.2, 0.5, 1, 2, 5, 10), 1),
+                  subsample = runif(1, 0, 1),
+                  colsample_bytree = runif(1, 0, 1),
+                  min_child_weight = sample(0:10, 1),
+                  lambda = sample(c(0, 0.1, 0.2, 0.5, 1, 2, 5, 10), 1),
+                  labmda_bias = sample(c(0, 0.1, 0.2, 0.5, 1, 2, 5, 10), 1),
+                  alpha = sample(c(0, 0.1, 0.2, 0.5, 1, 2, 5, 10), 1)
+    )
+    
+    
+    
+    cv.nround = 1000
+    cv.nfold = 3
+    seed.number = sample.int(10000,1)[[1]]
+    set.seed(seed.number)
+    mdcv <- xgb.cv(data=d.train, verbose = F, params = param, nfold = cv.nfold,
+                      nrounds = cv.nround, early_stopping_rounds = 30, maximize = FALSE, metrics = "error")
+    min_error = min(mdcv$evaluation_log$test_error_mean)
+  
+    if (min_error < best_error) {
+      best_error = min_error
+      best_nround = which.min(mdcv$evaluation_log$test_error_mean)
+      best_seednumber = seed.number
+      best_param = param
+      cvci[[i]] <- paste0((mdcv$evaluation_log$test_error_mean -
+                              mdcv$evaluation_log$test_error_std)[1],";",(mdcv$evaluation_log$test_error_mean +
+                              mdcv$evaluation_log$test_error_std)[1])
+     
+      
+                                }
+     
+  }
+  featlist[[i]] <- colnames(model_df[,-ncol(model_df)])
+  list_param[[i]] <- best_param
+  error_list[[i]] <- best_error
+  seed_list[[i]] <- best_seednumber
+
+}
+
+temp <- unlist(featlist[1])#create new variable of just features from first iteration
+
+#unlist the rest of the iteration results and add to variable with features as strings
+for(i in 2:50){
+  temp2 <- unlist(featlist[i])
+  temp <- c(temp,temp2)
+
+}
+
+#create data frame with each unique feature from all 50 iterations
+feat_df <- as.data.frame(unique(temp))
+
+
+for(i in 1:nrow(feat_df)){ #number of unique features is feat_df length
+  feat_df[i,2] <- length(which(temp == feat_df[i,1]))#find number of times each unique feature was chosen
+}
+
+feat_df <- feat_df[order(feat_df[,2], decreasing = T),]#order feats decreasing from most to least chosen;decide cutoff for inclusion in next step of feature selection
+colnames(feat_df) <- c("Feature", "Count")
+
+```
+
+Test combinations of features with counts > 4 with cross-validation
+```{r machine learning, echo = TRUE, eval = FALSE, message=FALSE}
+
+feats_poss <- feat_df
+
+keep <- which(feats_poss$Count >= 4)
+feats_poss <- feats_poss[keep,]
+
+feats <- combn(feats_poss$Feature,4)
+feats <- t(feats)
+
+featlist <- list()
+list_param <- list()
+val_error_list <- list()
+train_error_list <- list()
+error_list <- list()
+seed_list <- list()
+cvci <- list()
+frame <- as.data.frame(list())
+
+
+for(i in 1:nrow(feats)){
+ml_feat <- unlist(feats[i,])
+  
+mes_df <- mes.df.annot
+
+rownames(mes_df)<- gsub("\\.", " ", rownames(mes_df))
+rownames(mes_df)<- gsub("\\(", " ", rownames(mes_df))
+rownames(mes_df)<- gsub("\\)", " ", rownames(mes_df))
+rownames(mes_df)<- gsub("\\-", " ", rownames(mes_df))
+rownames(mes_df)<- gsub("\\+", " ", rownames(mes_df))
+rownames(mes_df)<- gsub("\\_", " ", rownames(mes_df))
+rownames(mes_df)<- gsub(" ", "", rownames(mes_df))
+rownames(mes_df) <- toupper(rownames(mes_df))
+
+ml_feat<- gsub("\\.", " ", ml_feat)
+ml_feat<- gsub("\\(", " ", ml_feat)
+ml_feat<- gsub("\\)", " ", ml_feat)
+ml_feat<- gsub("\\-", " ", ml_feat)
+ml_feat<- gsub("\\+", " ", ml_feat)
+ml_feat<- gsub("\\_", " ", ml_feat)
+ml_feat<- gsub(" ", "", ml_feat)
+ml_feat <- toupper(ml_feat)
+
+common <- intersect(rownames(mes_df), ml_feat)
+model_df <- as.data.frame(t(mes.df.annot[which(rownames(mes_df) %in% common),]))
+
+pfspz_train <- pfspz_cpm_SM6[,pfspz_cpm_SM6$SAMPLEID %in% rownames(model_df)]
+outcome <- as.data.frame(pfspz_train$mal.atp.3)
+rownames(outcome) <- pfspz_train$SAMPLEID
+colnames(outcome) <- "Outcome3mos"
+outcome$Outcome3mos <- as.character(outcome$Outcome3mos)
+
+#check that outcome and model_df are in the same order
+model_df$SubjID <- rownames(model_df)
+outcome$SubjID <- rownames(outcome)
+length(match(rownames(outcome), rownames(model_df)))
+model_df <- left_join(model_df, outcome)
+model_df$Outcome3mos <- gsub("never_infected", 0, model_df$Outcome3mos)
+model_df$Outcome3mos <- gsub("infected", 1, model_df$Outcome3mos)
+rownames(model_df) <- model_df$SubjID
+model_df <- model_df[,-which(colnames(model_df) == "SubjID")] #Removing SubjID
+
+#create training and test sets
+train_df <- model_df[indices,]
+train.rows <- rownames(train_df)
+test_df <- model_df[-indices,]
+test.rows <- rownames(test_df)
+
+
+train <- matrix(as.numeric(as.character(unlist(train_df))), ncol = ncol(train_df))
+colnames(train) <- colnames(train_df)
+test <- matrix(as.numeric(unlist(test_df)), ncol = ncol(test_df))
+colnames(test) <-  colnames(test_df)
+all <- matrix(as.numeric(unlist(model_df)), ncol = ncol(model_df))
+colnames(all) <-  colnames(model_df)
+
+#build xgboost datasets
+d.train <- xgb.DMatrix(data = train[,-ncol(train)], label = (train[,ncol(train)]))#
+d.test <- xgb.DMatrix(data = test[,-ncol(test)], label = (test[,ncol(test)]))#indices need to match training
+
+temp.seed <- sample.int(10000,1)[[1]]
+
+#Looping to train best parameters
+best_param <- list()
+best_seednumber = temp.seed
+best_error = Inf
+
+#initialize lists to save feature selection results
+featlist <- list()
+feat_seeds <- list()
+seed_list <- list()
+list_param <- list()
+error_list <- list()
+cvci <- list()
+frame <- as.data.frame(NA)
+
+  for (iter in 1:250) {
+    print(glue::glue("Curr Iter: ", iter, " Best Error: ", best_error))
+    param <- list(objective = 'binary:logistic',
+                  max_depth = sample(2:15,1),
+                  eta = runif(1, 0.01, 0.5),
+                  gamma = sample(c(0, 0.1, 0.2, 0.5, 1, 2, 5, 10), 1),
+                  subsample = runif(1, 0, 1),
+                  colsample_bytree = runif(1, 0, 1),
+                  min_child_weight = sample(0:10, 1),
+                  lambda = sample(c(0, 0.1, 0.2, 0.5, 1, 2, 5, 10), 1),
+                  labmda_bias = sample(c(0, 0.1, 0.2, 0.5, 1, 2, 5, 10), 1),
+                  alpha = sample(c(0, 0.1, 0.2, 0.5, 1, 2, 5, 10), 1)
+    )
+    
+    cv.nround = 500
+    cv.nfold = 3
+    seed.number = sample.int(10000,1)[[1]]
+    set.seed(seed.number)
+    mdcv <- xgb.cv(data=d.train, verbose = F, params = param, nfold = cv.nfold,
+                      nrounds = cv.nround, early_stopping_rounds = 30, maximize = FALSE, metrics = "error")
+    min_error = min(mdcv$evaluation_log$test_error_mean)
+  
+    if (min_error < best_error) {
+      best_error = min_error
+      best_nround = which.min(mdcv$evaluation_log$test_error_mean)
+      best_seednumber = seed.number
+      best_param = param
+      cvci[[i]] <- paste0((mdcv$evaluation_log$test_error_mean - mdcv$evaluation_log$test_error_std)[1],";",(mdcv$evaluation_log$test_error_mean + mdcv$evaluation_log$test_error_std)[1])
+     
+      
+    }
+     
+  }
+  
+#save features and parameters to choose best features
+featlist[[i]] <- ml_feat
+list_param[[i]] <- best_param
+error_list[[i]] <- best_error
+  
+best_param2 <- best_param #from saved Rdata file
+seed_list[[i]] <- best_seednumber
+# val_error_list[[i]] <- model$evaluation_log$val_error[model$best_iteration]
+# train_error_list[[i]] <- model$evaluation_log$train_error[model$best_iteration]
+k <- i 
+frame[k,1] <-  as.data.frame(c(paste(featlist[[i]][1], featlist[[i]][2], featlist[[i]][3], featlist[[i]][4], sep = ";")))
+
+
+temp <- unlist(list_param[[i]])
+for(ii in 2:10){
+  temp2 <- unlist(list_param[[i]])[ii]
+  temp3 <- paste(temp[1], temp2, sep = ";")
+  temp <- temp3
+}
+
+frame[k,2] <- temp
+frame[k,3] <- seed_list[[i]]
+frame[k,4] <- error_list[[i]]
+frame[k,5] <- cvci[[i]]
+
+colnames(frame) <- c("Features", "Parameters", "Seed" , "Best CV Error", "Confidence Interval")
+  
+if(i%%250 == 0){saveRDS(list_frame, file = paste0(plotdir,"Feature Selection Generate Feature List.RDS"))}
+}
+
+```
+
+Test models with cross-validation error <0.2 with test set
+```{r test feature combinations, eval = FALSE, echo = TRUE, message=FALSE}
+
+#test model features and parameters with cv error <.2 or 20%
+new_feat_df <- frame[,1]
+keep <- which(frame$`Confidence Interval` <= 0.2)
+new_feat_df <- new_feat_df[keep,]
+
+
+
+for(i in 1:nrow(new_feat_df)){
+ml_feat <- unlist(new_feat_df[i,])
+  
+mes_df <- mes.df.annot
+
+rownames(mes_df)<- gsub("\\.", " ", rownames(mes_df))
+rownames(mes_df)<- gsub("\\(", " ", rownames(mes_df))
+rownames(mes_df)<- gsub("\\)", " ", rownames(mes_df))
+rownames(mes_df)<- gsub("\\-", " ", rownames(mes_df))
+rownames(mes_df)<- gsub("\\+", " ", rownames(mes_df))
+rownames(mes_df)<- gsub("\\_", " ", rownames(mes_df))
+rownames(mes_df) <- toupper(rownames(mes_df))
+
+ml_feat<- gsub("\\.", " ", ml_feat)
+ml_feat<- gsub("\\(", " ", ml_feat)
+ml_feat<- gsub("\\)", " ", ml_feat)
+ml_feat<- gsub("\\-", " ", ml_feat)
+ml_feat<- gsub("\\+", " ", ml_feat)
+ml_feat<- gsub("\\_", " ", ml_feat)
+ml_feat <- toupper(ml_feat)
+
+common <- intersect(rownames(mes_df), ml_feat)
+model_df <- as.data.frame(t(mes_df[which(rownames(mes_df) %in% common),]))
+
+pfspz_train <- pfspz_cpm_SM6[,pfspz_cpm_SM6$SAMPLEID %in% rownames(model_df)]
+outcome <- as.data.frame(pfspz_train$mal.atp.3)
+rownames(outcome) <- pfspz_train$SAMPLEID
+colnames(outcome) <- "Outcome3mos"
+outcome$Outcome3mos <- as.character(outcome$Outcome3mos)
+
+#check that outcome and model_df are in the same order
+model_df$SubjID <- rownames(model_df)
+outcome$SubjID <- rownames(outcome)
+length(match(rownames(outcome), rownames(model_df)))
+model_df <- left_join(model_df, outcome)
+model_df$Outcome3mos <- gsub("never_infected", 0, model_df$Outcome3mos)
+model_df$Outcome3mos <- gsub("infected", 1, model_df$Outcome3mos)
+rownames(model_df) <- model_df$SubjID
+model_df <- model_df[,-which(colnames(model_df) == "SubjID")] #Removing SubjID
+
+#create training and test sets
+train_df <- model_df[indices,]
+train.rows <- rownames(train_df)
+test_df <- model_df[-indices,]
+test.rows <- rownames(test_df)
+
+train <- matrix(as.numeric(as.character(unlist(train_df))), ncol = ncol(train_df))
+colnames(train) <- colnames(train_df)
+test <- matrix(as.numeric(unlist(test_df)), ncol = ncol(test_df))
+colnames(test) <-  colnames(test_df)
+all <- matrix(as.numeric(unlist(model_df)), ncol = ncol(model_df))
+colnames(all) <-  colnames(model_df)
+
+#build xgboost datasets
+d.train <- xgb.DMatrix(data = train[,-ncol(train)], label = (train[,ncol(train)]))#
+d.test <- xgb.DMatrix(data = test[,-ncol(test)], label = (test[,ncol(test)]))#indices need to match training
+
+# best_param <- list(unlist(frame$Parameters))
+# best_seednumber = frame$Seed
+     
+set.seed(best_seednumber)#set from saved data
+model <- xgb.train(data = d.train, params = best_param,nrounds = 50000, watchlist = list(val = d.test, train = d.train), early_stopping_rounds = 400, print_every_n = 10, maximize = F, eval_metric = "error")
+
+#save features and parameters to choose best features
+featlist[[i]] <- ml_feat
+list_param[[i]] <- best_param
+error_list[[i]] <- best_error
+seed_list[[i]] <- best_seednumber
+val_error_list[[i]] <- model$evaluation_log$val_error[model$best_iteration]
+train_error_list[[i]] <- model$evaluation_log$train_error[model$best_iteration]
+
+k <- i 
+final_frame[k,1] <-  as.data.frame(c(paste(featlist[[i]][1], featlist[[i]][2], featlist[[i]][3], featlist[[i]][4], sep = ";")))
+
+
+temp <- unlist(list_param[[i]])
+for(ii in 2:10){
+  temp2 <- unlist(list_param[[i]])[ii]
+  temp3 <- paste(temp[1], temp2, sep = ";")
+  temp <- temp3
+}
+
+final_frame[k,2] <- temp
+final_frame[k,3] <- seed_list[[i]]
+final_frame[k,4] <- seed_list[[i]]
+final_frame[k,5] <- val_error_list[[i]]
+final_frame[k,6] <- train_error_list[[i]]
+
+
+colnames(final_frame) <- c("Features", "Parameters", "Seed", "Test Error", "Train Error")
+
+}  
+
+```
+
+```{r set ml_feat from saved data, echo = FALSE, eval = TRUE, message=FALSE}
+
+ml_feat <- c("spliceosome M250", "enriched in antigen presentation III M951","T & B CELL DEVELOPMENT, ACTIVATION M620","FACSCD14oflivemonocytes")#features from saved data
+
+
+#saved indices
+indices <- c(1, 4, 6,  7,  8, 10, 11, 12, 14, 15, 16, 20, 21, 22, 23, 24, 25, 28, 29, 30, 32, 34, 35, 36, 39, 40, 41, 42, 43, 45, 46, 47, 48, 49, 50, 51, 53, 54, 56, 58, 59, 63)
+```
+
+```{r machine learning model, message=FALSE}
+
+mes_df <- mes.df.annot
+
+rownames(mes_df)<- gsub("\\(", "", rownames(mes_df))
+rownames(mes_df)<- gsub("\\)", "", rownames(mes_df))
+rownames(mes_df)<- gsub("\\-", "", rownames(mes_df))
+rownames(mes_df)<- gsub("\\+", "", rownames(mes_df))
+rownames(mes_df)<- gsub("\\_", "", rownames(mes_df))
+rownames(mes_df)<- gsub("\\.", "", rownames(mes_df))
+rownames(mes_df) <- toupper(rownames(mes_df))
+
+ml_feat <- toupper(ml_feat)
+
+common <- intersect(rownames(mes_df), ml_feat)
+model_df <- as.data.frame(t(mes.df.annot[which(rownames(mes_df) %in% common),]))
+
+pfspz_train <- pfspz[,pfspz$SAMPLEID %in% rownames(model_df)]
+outcome <- as.data.frame(pfspz_train$mal.atp.3)
+rownames(outcome) <- pfspz_train$SAMPLEID
+colnames(outcome) <- "Outcome3mos"
+outcome$Outcome3mos <- as.character(outcome$Outcome3mos)
+
+#check that outcome and model_df are in the same order
+model_df$SubjID <- rownames(model_df)
+outcome$SubjID <- rownames(outcome)
+length(match(rownames(outcome), rownames(model_df)))
+model_df <- left_join(model_df, outcome)
+model_df$Outcome3mos <- gsub("never_infected", 0, model_df$Outcome3mos)
+model_df$Outcome3mos <- gsub("infected", 1, model_df$Outcome3mos)
+rownames(model_df) <- model_df$SubjID
+model_df <- model_df[,-which(colnames(model_df) == "SubjID")] #Removing SubjID
+
+#create training and test sets
+train_df <- model_df[indices,]
+train.rows <- rownames(train_df)
+test_df <- model_df[-indices,]
+test.rows <- rownames(test_df)
+
+
+train <- matrix(as.numeric(as.character(unlist(train_df))), ncol = ncol(train_df))
+colnames(train) <- colnames(train_df)
+test <- matrix(as.numeric(unlist(test_df)), ncol = ncol(test_df))
+colnames(test) <-  colnames(test_df)
+all <- matrix(as.numeric(unlist(model_df)), ncol = ncol(model_df))
+colnames(all) <-  colnames(model_df)
+
+#build xgboost datasets
+d.train <- xgb.DMatrix(data = train[,-ncol(train)], label = (train[,ncol(train)]))#
+d.test <- xgb.DMatrix(data = test[,-ncol(test)], label = (test[,ncol(test)]))#indices need to match training
+
+best_param2 <- list()
+best_param2$objective <- 'binary:logistic'
+best_param2$max_depth <- 15
+best_param2$eta <- 0.282878813734278
+best_param2$gamma <- 0.1
+best_param2$subsample <- 0.520223272033036
+best_param2$colsample_bytree <- 0.104315468110144
+best_param2$min_child_weight <- 1
+best_param2$lambda <- 5
+best_param2$alpha <- 0.5
+
+set.seed(4050)#set from saved data
+model <- xgb.train(data = d.train, params = best_param2,nrounds = 50000, watchlist = list(val = d.test, train = d.train), early_stopping_rounds = 400, print_every_n = 10, maximize = F, eval_metric = "error")
+
+pred <- predict(model, newdata = test[,c(1:(ncol(test)-1))])
+
+(sum((pred >= 0.5) == (test[,ncol(test)] == 1)))/length(test[,ncol(test)])
+
+imp <- xgb.importance(feature_names = colnames(train[,-5]), model = model) 
+xgb.plot.importance(importance_matrix = imp)
+
+plot_imp <- ggplot(data = imp, aes(x = Importance, y = reorder(Feature, Importance))) +
+    geom_bar(stat = 'identity',fill = "#d7301f", width = 0.95) +
+    theme_classic(base_family = "sans", base_size = 6) +
+    theme(axis.ticks = element_line(color = "grey80")) +
+    ggtitle("Baseline Transcriptomics Feature Importance") +
+    xlab("Importance") + ylab("Features") +
+    theme(plot.title=element_text(size =6, hjust = 1, vjust = -1), aspect.ratio = 0.75, axis.text.x.bottom =element_text(size =6)) +
+    theme(legend.position = "none")
+  
+print(plot_imp)
+```
+
+The purpose of this chunk is to make use of xgboostExplainer to understand the impact of each feature on the model -- making logistic regression model more transparent
+```{r xgb explain, echo= TRUE, message=FALSE}
+library(xgboostExplainer)
+
+#predictions
+pred.test <- predict(model, newdata = test[,c(1:(ncol(test)-1))])#using test data as newdata -- can use all data according to xgboost documentation
+nodes.test <- predict(model, newdata = test[,c(1:(ncol(test)-1))], predleaf = TRUE)
+
+#step 1: build explainer
+explainer <- buildExplainer(model, d.train, type = "binary")#build explanations for nodes/leafs
+pred.breakdown <- explainPredictions(model, explainer, d.test)#predictions explained
+
+#show waterfall
+for (i in 1:nrow(test)){
+water <- showWaterfall(model, explainer, d.test, test[,c(1:(ncol(test)-1))],i,type = "binary")
+print(water)
+}
+
+
+
+```
+
+```{r xgb shap summary plot, message=FALSE, echo=FALSE}
+
+
+addSmallLegend <- function(myPlot, pointSize = 0.5, textSize = 7, spaceLegend = 0.5) {
+    myPlot +
+        guides(shape = guide_legend(override.aes = list(size = pointSize)),
+               color = guide_legend(override.aes = list(size = pointSize))) +
+        theme(legend.title = element_text(size = textSize), 
+              legend.text  = element_text(size = textSize),
+              legend.key.size = unit(spaceLegend, "lines"))
+}
+
+# Apply on original plot
+
+
+xgb.ggplot.shap.summary <- function(data, shap_contrib = NULL, features = NULL, top_n = 10, model = NULL,
+                                    trees = NULL, target_class = NULL, approxcontrib = FALSE, subsample = NULL) {
+  data_list <- xgboost:::xgb.shap.data(
+    data = data,
+    shap_contrib = shap_contrib,
+    features = features,
+    top_n = top_n,
+    model = model,
+    trees = trees,
+    target_class = target_class,
+    approxcontrib = approxcontrib,
+    subsample = subsample,
+    max_observations = 10000  # 10,000 samples per feature.
+  )
+  plot_outcome <- rep(test[,ncol(test)], 3)
+  p_data <- xgboost:::prepare.ggplot.shap.data(data_list, normalize = TRUE)
+  # Reverse factor levels so that the first level is at the top of the plot
+  p_data[, "feature" := factor(feature, rev(levels(feature)))]
+  p <- ggplot2::ggplot(p_data, ggplot2::aes(x = feature, y = p_data$shap_value, fill = p_data$feature_value)) +
+    ggplot2::geom_jitter(alpha = 1, width = 0.1, height = 0.1, size = 2, shape = 21) +
+    ggplot2::scale_fill_distiller(limits = c(min(p_data$feature_value),max(p_data$feature_value)), na.value = 0, type = "div", palette = "Spectral", direction = -1) +
+    ggplot2::geom_abline(slope = 0, intercept = 0, colour = "darkgrey") +
+    ggplot2::coord_flip()
+
+ 
+ 
+ }
+
+```
+
+
+ROC curves for ML model
+```{r ggROC, echo = TRUE, message=FALSE}
+library(pROC)
+
+roc1 <- pROC::roc(test[,ncol(test)], pred)
+roc1 <- smooth(roc1)
+
+
+ggroc <- function(roc, showAUC = TRUE, interval = 0.2, breaks = seq(0, 1, interval)){
+  require(pROC)
+  if(class(roc) != "roc")
+    simpleError("Please provide roc object from pROC package")
+  plotx <- rev(roc$specificities)
+  ploty <- rev(roc$sensitivities)
+  
+  ggplot(NULL, aes(x = plotx, y = ploty)) +
+    geom_segment(aes(x = 0, y = 1, xend = 1,yend = 0), alpha = 0.5, colour = "red") + 
+    geom_step() +
+    scale_x_reverse(name = "Specificity",limits = c(1,0), breaks = breaks, expand = c(0.001,0.001)) + 
+    scale_y_continuous(name = "Sensitivity", limits = c(0,1), breaks = breaks, expand = c(0.001, 0.001)) +
+    theme_bw(base_family = "sans", base_size = 6) +
+    theme(axis.ticks = element_line(color = "grey80")) +
+    coord_equal() + 
+    annotate("text", x = interval, y = interval, vjust = 0, label = paste("AUC =",sprintf("%.3f",roc$auc)), family = "sans", size = 7) +
+    geom_area(fill = "black", alpha = .4) +
+    ggtitle("Baseline All Features Model ROC")+
+    theme(plot.title=element_text(size =6)) 
+  }
+
+p <- ggroc(roc1)
+p + scale_fill_hue(l = 45)
+
+
+print(p)
+
+# Set our cutoff threshold
+pred.resp <- ifelse(pred >= 0.50, 1, 0)
+ 
+# Create the confusion matrix
+cm <- ModelMetrics::confusionMatrix(test[,ncol(test)],pred.resp)
+
+cm
+
+#create shap plot to visualize feature size and contribution to the model
+shap <- xgb.ggplot.shap.summary(data = test[,c(1:(ncol(test)-1))], model = model) +
+    theme_classic(base_family = "sans", base_size = 8) +
+    theme(axis.ticks = element_line(color = "grey80")) +
+    ggtitle("Baseline High Dose Global Feature Impact") +
+    ylab("SHAP value (impact on model output)") + xlab(NULL) +
+    theme(plot.title=element_text(size =6, hjust = 1, vjust = -1), aspect.ratio = .25, axis.text.x =element_text(size =6), axis.text.y =element_text(size =6)) + theme(legend.position = "bottom") + labs(color ="Feature Value") 
+  
+print(addSmallLegend(shap))
+
+```
+
