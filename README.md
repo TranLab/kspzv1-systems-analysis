@@ -46,7 +46,7 @@ Code for systems analysis of KSPZV1 malaria vaccine trial.
 
 ## Machine learning, class prediction
 
-[Class prediction, pre-immunization baseline, 1.8x10^6 PfSPZ (REVISED)]([https://github.com/TranLab/kspzv1-systems-analysis/html](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Xgboost-Multimodal-Model-LS-Revised.html)
+[Class prediction, pre-immunization baseline, 1.8x10^6 PfSPZ (REVISED)](https://tranlab.github.io/kspzv1-systems-analysis/html/KSPZV1-Xgboost-Multimodal-Model-LS-Revised.html)
 
 ## Other
 
