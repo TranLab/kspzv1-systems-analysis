@@ -26,9 +26,9 @@ Revised analysis includes adjustments for:
 
 1. Batch
 2. Sex
-2. Study site
-3. log10(CSP Ab + 1)
-4. parasitemia at VAX1 (closest to baseline)
+3. Study site
+4. log10(CSP Ab + 1)
+5. parasitemia at VAX1 (closest to baseline)
 
 ### Load ExpressionSet
 
@@ -173,7 +173,7 @@ devtools::source_url("https://github.com/TranLab/ModuleLists/blob/main/NamedGene
 GSEAtab <- ranks
 for(i in names(ranks)){
   GSEAtab[[i]] <- NamedGeneRankList2GseaTable(rankedgenes = ranks[[i]],
-                                         geneset = "all",
+                                         geneset = "bloodmodules",
                                          output_directory = tempdir(),
                                          filename_prefix = "GSEA",
                                          sampleSize = 101,
@@ -296,7 +296,7 @@ print(BottomPlot)
 ```{r save DEG tables, echo=FALSE, eval=FALSE, message=FALSE, warning=FALSE}
 degtab_long <- bind_rows(degtab, .id = "treatment") %>%
   dplyr::select(treatment, GeneSymbol, EnsemblID, descripton_new, logFC,logCPM, F, PValue, FDR) %>%
-  mutate(study = "KSPZV1", timepoint = "pre-immunization baseline adj batch, CSP Ab baseline, Pf VAX1, site", comparison = "protected (P) vs. not protected (NP) at 3 months") %>%
+  mutate(study = "KSPZV1", timepoint = "pre-immunization baseline adj batch, sex, CSP Ab baseline, Pf VAX1, site", comparison = "protected (P) vs. not protected (NP) at 3 months") %>%
   dplyr::select(study, treatment, timepoint, comparison, GeneSymbol, EnsemblID, descripton_new, logFC,logCPM, F, PValue, FDR) %>%
   dplyr::rename(hgnc_symbol = GeneSymbol, ensembl_id = EnsemblID, description = descripton_new)
 degtab_VRC <- readxl::read_excel("/Volumes/GoogleDrive/My Drive/Manuscripts/KSPZV1 Manuscript/Cell Submission October 2021/Supplementary Tables/Table S1 Prevax DEG Tables for KSPZV1 VRC312 VR314.xlsx") %>%

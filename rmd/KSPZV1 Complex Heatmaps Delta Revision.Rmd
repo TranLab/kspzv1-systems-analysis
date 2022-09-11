@@ -297,11 +297,13 @@ table(pData.cluster$Cluster.pam4.cl16,pData.cluster$treat)
 ## Plot stats based on clusters
 
 ```{r make stats plots based on clusters, message=FALSE, warning=FALSE}
+library(tidyverse)
 basefont <- "sans"
 basefontsize <- 9
 pvalfontsize <- 7
-mySignifLabel <- "p.signif"
 symnum.args <- list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 0.1, 1), symbols = c("****", "***", "**", "*", "trend",""))
+pval_label <- "p.format"
+adjust_p <- "adjp"
 
 #OUTCOME
 foo1 <- c(1,2,3,4)  
@@ -310,11 +312,16 @@ for(i in names(summary(pData.cluster$treat))){
   pData.cluster.temp <- pData.cluster %>%
     filter(treat == i)
   foo1[i] <- signif(fisher.test(table("Cluster" = pData.cluster.temp$Cluster, "Outcome" = pData.cluster.temp$mal.atp.3))$p.value,2)
-  foo1[i] <- ifelse(foo1[i] >= 0.05, "",
-                    ifelse(foo1[i] >= 0.01 & foo1[i] < 0.05, "*",
-                           ifelse(foo1[i] >= 0.001 & foo1[i] < 0.01, "**",
-                                  ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
-  }
+    if(pval_label == "p.format" & adjust_p == "adjp"){
+      foo1 <- p.adjust(foo1, method = "BH")
+    }
+    if(pval_label == "p.signif" ){
+      foo1[i] <- ifelse(foo1[i] >= 0.05, "",
+                        ifelse(foo1[i] >= 0.01 & foo1[i] < 0.05, "*",
+                               ifelse(foo1[i] >= 0.001 & foo1[i] < 0.01, "**",
+                                      ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
+    }
+    }
 dat_text <- data.frame(treat = factor(levels(pData.cluster$treat),
                                       levels = levels(pData.cluster$treat)),
                        label = foo1, Cluster = levels(factor(pData.cluster.temp$Cluster)), x = 1.5, y = 25,
@@ -342,10 +349,21 @@ Outcome.counts <- pData.cluster %>%
 #Days to first parasitemia
 TTE.boxplot <- pData.cluster %>%
   mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)"))) %>%
+  dplyr::filter(!(is.na(tte.mal.atp.6) | is.na(Outcome)))
+
+TTE.boxplot %>% 
+  filter(!(treat == "4.5 x 10^5 PfSPZ" & Cluster == "SC2")) %>%
+  group_by(treat, Cluster) %>%
+  do(w = wilcox.test(tte.mal.atp.6~Outcome, data=., paired=FALSE, exact = FALSE)) %>%
+  summarize(treat, Cluster, Wilcox_pval = w$p.value) %>%
+  mutate(padj = p.adjust(Wilcox_pval, method= "BH")) %>%
+  mutate_if(is.numeric, signif, 2)
+
+TTE.boxplot %>%
   ggplot(., aes(Cluster, tte.mal.atp.6, fill = Outcome, color = Outcome)) +
   geom_point(position = position_jitterdodge()) +
   geom_boxplot(alpha = 0.4, color = "grey30", outlier.shape = NA) +
-  stat_compare_means(aes(group = Outcome), label = "p.signif",
+  stat_compare_means(aes(group = Outcome), label = pval_label,
                      method = "wilcox.test", label.x.npc = "center", vjust = 1, symnum.args = symnum.args) +
   scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
   scale_color_manual(values = c("#A6CEE3", "#1F78B4")) +
@@ -363,11 +381,21 @@ TTE.boxplot <- pData.cluster %>%
 #CSP-specific IgG at pre-vax
 CSPbl.boxplot <- pData.cluster %>%
   mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)"))) %>%
-  dplyr::filter(!(is.na(pfcsp_pre) | is.na(Outcome))) %>% 
+  dplyr::filter(!(is.na(pfcsp_pre) | is.na(Outcome)))
+
+CSPbl.boxplot %>% 
+  filter(!(treat == "4.5 x 10^5 PfSPZ" & Cluster == "SC2")) %>%
+  group_by(treat, Cluster) %>%
+  do(w = wilcox.test(pfcsp_pre~Outcome, data=., paired=FALSE, exact = FALSE)) %>%
+  summarize(treat, Cluster, Wilcox_pval = w$p.value) %>%
+  mutate(padj = p.adjust(Wilcox_pval, method= "BH")) %>%
+  mutate_if(is.numeric, signif, 2)
+
+CSPbl.boxplot %>% 
   ggplot(., aes(Cluster, log10(pfcsp_pre+1), fill = Outcome, color = Outcome)) +
   geom_point(position = position_jitterdodge()) +
   geom_boxplot(alpha = 0.4, color = "grey30", outlier.shape = NA) +
-     stat_compare_means(aes(group = Outcome), label = "p.signif",
+     stat_compare_means(aes(group = Outcome), label = pval_label,
                         method = "wilcox.test", label.x.npc = "center", vjust = 1, symnum.args = symnum.args) +
   scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
   scale_color_manual(values = c("#A6CEE3", "#1F78B4")) +
@@ -385,11 +413,21 @@ CSPbl.boxplot <- pData.cluster %>%
 #CSP-specific IgG log2FC
 CSPlogfc.boxplot <- pData.cluster %>%
   mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)"))) %>%
-  dplyr::filter(!(is.na(log2FC_CSPAb) | is.na(Outcome))) %>% 
+  dplyr::filter(!(is.na(log2FC_CSPAb) | is.na(Outcome)))
+                
+CSPlogfc.boxplot %>% 
+  filter(!(treat == "4.5 x 10^5 PfSPZ" & Cluster == "SC2")) %>%
+  group_by(treat, Cluster) %>%
+  do(w = wilcox.test(log2FC_CSPAb~Outcome, data=., paired=FALSE, exact = FALSE)) %>%
+  summarize(treat, Cluster, Wilcox_pval = w$p.value) %>%
+  mutate(padj = p.adjust(Wilcox_pval, method= "BH")) %>%
+  mutate_if(is.numeric, signif, 2)
+                
+CSPlogfc.boxplot %>% 
   ggplot(., aes(x = Cluster, y = log2FC_CSPAb, fill = Outcome, color = Outcome)) +
   geom_point(position = position_jitterdodge()) +
   geom_boxplot(alpha = 0.4, color = "grey30", outlier.shape = NA) +
-  stat_compare_means(aes(group = Outcome), label = "p.signif",
+  stat_compare_means(aes(group = Outcome), label = pval_label,
                      method = "wilcox.test", label.x.npc = "center", vjust = 1, symnum.args = symnum.args) +
   scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
   scale_color_manual(values = c("#A6CEE3", "#1F78B4")) +
@@ -415,10 +453,15 @@ for(i in names(summary(pData.cluster$treat))){
   pData.cluster.temp <- pData.cluster %>%
     filter(treat == i)
   foo1[i] <- signif(fisher.test(table("Cluster" = pData.cluster.temp$Cluster, "Pf at Vax1" = pData.cluster.temp$Pf))$p.value,2)
-  foo1[i] <- ifelse(foo1[i] >= 0.05, "",
-                    ifelse(foo1[i] >= 0.01 & foo1[i] < 0.05, "*",
-                           ifelse(foo1[i] >= 0.001 & foo1[i] < 0.01, "**",
-                                  ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
+  if(pval_label == "p.format" & adjust_p == "adjp"){
+    foo1 <- p.adjust(foo1, method = "BH")
+    }
+  if(pval_label == "p.signif" ){
+    foo1[i] <- ifelse(foo1[i] >= 0.05, "",
+                      ifelse(foo1[i] >= 0.01 & foo1[i] < 0.05, "*",
+                             ifelse(foo1[i] >= 0.001 & foo1[i] < 0.01, "**",
+                                    ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
+  }
   }
 
 dat_text <- data.frame(treat = factor(levels(pData.cluster$treat), levels = levels(pData.cluster$treat)), label = foo1, Cluster = levels(factor(pData.cluster.temp$Cluster)),
@@ -443,11 +486,21 @@ Pf.counts <-  pData.cluster %>%
 
 #Pf episodes during vax period
 mal.dvax.tot.boxplot <- pData.cluster %>%
-  mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)"))) %>%
+  mutate(Outcome = factor(mal.atp.3, levels = c(1,0), labels = c("not protected (infected)", "protected (uninfected)")))
+
+mal.dvax.tot.boxplot %>% 
+  filter(!(treat == "4.5 x 10^5 PfSPZ" & Cluster == "SC2")) %>%
+  group_by(treat, Cluster) %>%
+  do(w = wilcox.test(mal.dvax.tot~Outcome, data=., paired=FALSE, exact = FALSE)) %>%
+  summarize(treat, Cluster, Wilcox_pval = w$p.value) %>%
+  mutate(padj = p.adjust(Wilcox_pval, method= "BH")) %>%
+  mutate_if(is.numeric, signif, 2)
+
+mal.dvax.tot.boxplot %>%
   ggplot(., aes(Cluster, mal.dvax.tot, fill = Outcome, color = Outcome)) +
   geom_point(position = position_jitterdodge()) +
   geom_boxplot(alpha = 0.4, color = "grey30", outlier.shape = NA) +
-  stat_compare_means(aes(group = Outcome), label = "p.signif",
+  stat_compare_means(aes(group = Outcome), label = pval_label,
                      method = "wilcox.test", label.x.npc = "center", vjust = 1, symnum.args = symnum.args) +
   scale_fill_manual(values = c("#A6CEE3", "#1F78B4")) +
   scale_color_manual(values = c("#A6CEE3", "#1F78B4")) +
@@ -470,10 +523,15 @@ for(i in names(summary(pData.cluster$treat))){
   pData.cluster.temp <- pData.cluster %>%
     filter(treat == i)
   foo1[i] <- signif(fisher.test(table("Cluster" = pData.cluster.temp$Cluster, "Site" = pData.cluster.temp$Site))$p.value,2)
-  foo1[i] <- ifelse(foo1[i] >= 0.05, "",
-                    ifelse(foo1[i] >= 0.01 & foo1[i] < 0.05, "*",
-                           ifelse(foo1[i] >= 0.001 & foo1[i] < 0.01, "**",
-                                  ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
+  if(pval_label == "p.format" & adjust_p == "adjp"){
+    foo1 <- p.adjust(foo1, method = "BH")
+    }
+  if(pval_label == "p.signif" ){
+    foo1[i] <- ifelse(foo1[i] >= 0.05, "",
+                      ifelse(foo1[i] >= 0.01 & foo1[i] < 0.05, "*",
+                             ifelse(foo1[i] >= 0.001 & foo1[i] < 0.01, "**",
+                                    ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
+  }
   }
 
 dat_text <- data.frame(treat = factor(levels(pData.cluster$treat), levels = levels(pData.cluster$treat)), label = foo1, Cluster = levels(factor(pData.cluster.temp$Cluster)),
@@ -533,6 +591,9 @@ print(ggarrange(
 ## Examine SC2 Placebo vs SC2 1.8x10^6 PfSPZ
 
 ```{r make sc2 specific barplot, echo=TRUE, message=FALSE, warning=FALSE}
+pval_label <- "p.format"
+adjust_p <- "adjp"
+
 sc2_subset <- pData.cluster %>%
   filter(Cluster == "SC2") %>%
   filter(treat == "Placebo" | treat == "1.8 x 10^6 PfSPZ") %>%
@@ -542,11 +603,16 @@ sc2_subset <- pData.cluster %>%
 
 #OUTCOME SC2 Placebo vs SC2 1.8x10^6 PfSPZ
 foo <- signif(fisher.test(table("Dosegroup" = sc2_subset$treat, "Outcome" = sc2_subset$Outcome))$p.value,2)
-foo_text <- ifelse(foo >= 0.05, "",
-              ifelse(foo >= 0.01 & foo < 0.05, "*",
-                     ifelse(foo >= 0.001 & foo1[i] < 0.01, "**",
-                            ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
-dat_text <- data.frame(label = foo_text, x = 1.5, y = 9, Outcome = c("not protected (infected)", "protected (uninfected)"))
+if(pval_label == "p.format" & adjust_p == "adjp"){
+    foo_text <- paste0("p=",p.adjust(foo, method = "BH"))
+    }
+if(pval_label == "p.signif" ){
+  foo_text <- ifelse(foo >= 0.05, "",
+                     ifelse(foo >= 0.01 & foo < 0.05, "*",
+                            ifelse(foo >= 0.001 & foo1[i] < 0.01, "**",
+                                   ifelse(foo1[i] >= 0.0001 & foo1[i] < 0.001, "***", "****"))))
+}
+  dat_text <- data.frame(label = foo_text, x = 1.5, y = 9, Outcome = c("not protected (infected)", "protected (uninfected)"))
 
 Outcome.counts <- sc2_subset  %>%
   ggplot(., aes(x=treat, fill = Outcome)) +
@@ -566,9 +632,9 @@ Outcome.counts <- sc2_subset  %>%
 
 
 ```{r save make sc2 specific barplot}
-cairo_pdf(filename = paste0(figdir, "Fig S5B SC2 sub Revision.pdf"), height = 1.25, width = 1)
-Outcome.counts
-dev.off()
+# cairo_pdf(filename = paste0(figdir, "Fig S5B SC2 sub Revision.pdf"), height = 1.25, width = 1)
+# Outcome.counts
+# dev.off()
 ```
 
 ### Extract clustering information for rows (genes)
