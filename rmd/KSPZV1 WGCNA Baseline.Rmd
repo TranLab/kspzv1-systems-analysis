@@ -1,7 +1,7 @@
 ---
 title: "KSPZV1 WGCNA baseline"
 author: "Tuan M. Tran"
-date: "09/12/2021"
+date: "12/1/2022"
 output: html_document
 ---
 
@@ -52,6 +52,8 @@ cor.pval <- 0.05
 ### Load ExpressionSet
 
 ```{r load cpm eset, message=FALSE, warning=FALSE}
+#local file: "PfSPZ_cpm_ExpressionSet_244x21815_AllGroups_bothBatches_0_rmBatchFX_06082021_TMT_logTRUE.rds"
+
 temp <- tempfile(fileext = ".rds")
 dl <- drive_download(
   as_id("1togaBlNIxiDj16FyXTC-r7Qw0A9cG2az"), path = temp, overwrite = TRUE)
@@ -219,31 +221,167 @@ for(i in modTraitP.temp$Module){
 }
 lapply(WGCNA_dat_select, nrow)
 ```
+### Output for Ingenuity Pathways Analysis
 
-### FGSEA on WGCNA Results
+```{r output modules to csv for IPA}
+write_csv(WGCNA_dat_select$MEskyblue1,
+          "/Users/tuantran/OneDrive - Indiana University/FromGoogle/Manuscripts/KSPZV1 Manuscript/JCI Submission November 2022/MEskyblue1.csv")
 
-rank by module membership
+write_csv(WGCNA_dat_select$MEmediumpurple1,
+          "/Users/tuantran/OneDrive - Indiana University/FromGoogle/Manuscripts/KSPZV1 Manuscript/JCI Submission November 2022/MEmediumpurple1.csv")
 
-```{r FGSEA on WGCNA Results, warning=FALSE, message=FALSE}
-minSize <- 5
-# Make rank list; ranked by ModuleMembership correlation
-  ranks <- GSEA_baseline_bound_df <- c()
-devtools::source_url("https://github.com/TranLab/ModuleLists/blob/main/NamedGeneRankList2GseaTable.R?raw=TRUE")
-for(k in names(WGCNA_dat_select)){
-  WGCNA_dat_select[[k]] <- WGCNA_dat_select[[k]][order(WGCNA_dat_select[[k]][,2], decreasing = TRUE),]
-  ranks[[k]] <- WGCNA_dat_select[[k]][,2]
-  names(ranks[[k]]) <- WGCNA_dat_select[[k]]$GeneSymbol
-  GSEA_baseline_bound_df[[k]] <- NamedGeneRankList2GseaTable(rankedgenes = ranks[[k]], geneset = "all", output_directory = tempdir(),
-                                                        filename_prefix = paste0("FGSEA_Mod_Corr_Protect_3_mos_", k,
-                                                                                 "_minSize", minSize), scoreType = "pos", minSize = minSize, fixed_seed = TRUE)
-  }
+write_csv(WGCNA_dat_select$MEthistle3,
+          "/Users/tuantran/OneDrive - Indiana University/FromGoogle/Manuscripts/KSPZV1 Manuscript/JCI Submission November 2022/MEthistle3.csv")
+
+write_csv(WGCNA_dat_select$MElavenderblush2,
+          "/Users/tuantran/OneDrive - Indiana University/FromGoogle/Manuscripts/KSPZV1 Manuscript/JCI Submission November 2022/MElavenderblush2.csv")
 ```
 
-### Plot WGCNA GSEA Results
+### Overrepresentation Analysis
+
+```{r WGCNA ora}
+devtools::source_url("https://github.com/TranLab/gene-set-functions/blob/main/ApplyORA2Genesets.R?raw=TRUE")
+
+myuniverse <- unique(fData(x)[fData(x)$EnsemblID %in% colnames(WGCNA_matrix),]$GeneSymbol)
+ORA_baseline_bound_df <- c()
+minSize <- 15
+
+#Combine similar modules skyblue1, mediumpurple1, thistle3 in to one
+WGCNA_dat_select2 <- list()
+WGCNA_dat_select2$EFHD2 <- WGCNA_dat_select$MElavenderblush2
+WGCNA_dat_select2$RIOK3_CSDE1_SEC62 <- data.table::rbindlist(list(WGCNA_dat_select$MEskyblue1,
+                                                WGCNA_dat_select$MEmediumpurple1,
+                                                WGCNA_dat_select$MEthistle3)) %>%
+  as.data.frame() %>%
+  rename(kMEMEall = "kMEMEskyblue1")
+for(k in names(WGCNA_dat_select2)){
+  WGCNA_dat_select2[[k]] <- WGCNA_dat_select2[[k]][order(WGCNA_dat_select2[[k]][,2], decreasing = TRUE),]
+  ORA_baseline_bound_df[[k]] <- ApplyORA2Genesets(genelist = WGCNA_dat_select2[[k]]$GeneSymbol,
+                                                  geneset = "all",
+                                                  universe = myuniverse,
+                                                  output_directory = tempdir(),
+                                                  filename_prefix = paste0("ORA_Mod_Corr_Protect_3_mos_", k,
+                                                                           "_minSize", minSize),
+                                                  minSize = minSize)
+  }
+
+
+RIOK3_ORA_baseline_bound <- bind_rows(ORA_baseline_bound_df$MEskyblue1, .id = "module_type") %>%
+  mutate(module = "skyblue1") %>%
+  mutate(module_size = nrow(WGCNA_dat_select$MEskyblue1)) %>%
+  mutate(hub_gene = "RIOK3") 
+CSDE1_ORA_baseline_bound <- bind_rows(ORA_baseline_bound_df$MEmediumpurple1, .id = "module_type") %>%
+  mutate(module = "mediumpurple1") %>%
+  mutate(module_size = nrow(WGCNA_dat_select$MEmediumpurple1)) %>%
+  mutate(hub_gene = "CSDE1")
+SEC62_ORA_baseline_bound <- bind_rows(ORA_baseline_bound_df$MEthistle3, .id = "module_type") %>%
+  mutate(module = "thistle3") %>%
+  mutate(module_size = nrow(WGCNA_dat_select$MEthistle3)) %>%
+  mutate(hub_gene = "SEC62")
+EFHD2_ORA_baseline_bound <- bind_rows(ORA_baseline_bound_df$MElavenderblush2, .id = "module_type") %>%
+  mutate(module = "lavenderblush2") %>%
+  mutate(module_size = nrow(WGCNA_dat_select$MElavenderblush2)) %>%
+  mutate(hub_gene = "EFHD2")
+
+EFHD2_ORA_baseline_bound <- bind_rows(ORA_baseline_bound_df$EFHD2, .id = "module_type") %>%
+  mutate(module = "lavenderblush2") %>%
+  mutate(module_size = nrow(WGCNA_dat_select$MElavenderblush2)) %>%
+  mutate(hub_gene = "EFHD2")
+
+RIOK3_CSDE1_SEC62_ORA_baseline_bound <- bind_rows(ORA_baseline_bound_df$RIOK3_CSDE1_SEC62, .id = "module_type") %>%
+  mutate(module = "the_three_amigos") %>%
+  mutate(module_size = nrow(WGCNA_dat_select$MElavenderblush2)) %>%
+  mutate(hub_gene = "RIOK3_CSDE1_SEC62")
+
+
+ORA_baseline_allbound <- bind_rows(RIOK3_ORA_baseline_bound,
+                                  CSDE1_ORA_baseline_bound,
+                                  SEC62_ORA_baseline_bound,
+                                  EFHD2_ORA_baseline_bound,
+                                  RIOK3_CSDE1_SEC62_ORA_baseline_bound) %>%
+  mutate(neglogpadj = -log10(padj)) %>%
+  mutate(pct_overlap = 100*(overlap/module_size)) %>%
+  dplyr::select(module, module_size, hub_gene, module_type, pathway, overlap,
+                pct_overlap, size, overlapGenes, pval, padj, neglogpadj)
+```
+
+### Plot WGCNA Over-representation Results
 
 baseline analysis
 
-```{r plot wgcna gsea, warning=FALSE, message=FALSE}
+```{r plotdat wgcna ORA, warning=FALSE, message=FALSE}
+myModuleTypes <- c("MSigDB_Hallmark_v7.4", "MSigDB_C2_kegg_v7.4", "highBTMs", "lowBTMs","BloodGen3Module")
+myORAClusterPlotDat <- ORA_baseline_allbound %>%
+  mutate(pathway = gsub("VS", "v", pathway)) %>%
+  mutate(pathway = gsub("Vd", "Vδ", pathway)) %>%
+  mutate(pathway = gsub("gd", "γδ", pathway)) %>%
+  mutate(pathway = sub(".*?\\_", "", pathway)) %>%
+  mutate(pathway = fct_reorder(pathway, neglogpadj))  %>%
+  arrange(desc(neglogpadj))%>%
+  mutate(TextLabelColor = ifelse(module_type == "BloodGen3Module", scales::muted("red"),
+                                 ifelse(module_type == "MSigDB_C2_kegg_v7.4", scales::muted("blue"),
+                                        ifelse(module_type == "MSigDB_Hallmark_v7.4", "black","gray")))) %>%
+  filter(padj < 0.01) %>%
+  filter(pct_overlap >= 5) %>%
+  filter(module_type %in% myModuleTypes) %>%
+  group_by(hub_gene) %>%
+  arrange(neglogpadj) %>%
+  slice_tail(n = 4) %>%
+  ungroup()
+```
+
+### Arrange plots
+
+```{r make ggarranged plot, warning=FALSE, message=FALSE}
+addSmallLegend <- function(myPlot, pointSize = 1.5, textSize = 3, spaceLegend = 0.3) {
+    myPlot +
+        guides(shape = guide_legend(override.aes = list(size = pointSize)),
+               color = guide_legend(override.aes = list(size = pointSize))) +
+        theme(legend.title = element_text(size = textSize), 
+              legend.text  = element_text(size = textSize),
+              legend.key.size = unit(spaceLegend, "lines"))
+}
+
+scale_begin <- floor(min(myORAClusterPlotDat$pct_overlap, na.rm = TRUE))
+scale_end <- ceiling(max(myORAClusterPlotDat$pct_overlap, na.rm = TRUE))
+
+myArrangedPlot <- myORAClusterPlotDat %>%
+  filter(hub_gene == "EFHD2" | hub_gene == "RIOK3_CSDE1_SEC62") %>%
+  mutate(pathway = fct_reorder(pathway, neglogpadj))  %>%
+  ggplot(., aes(x = neglogpadj, y = pathway, fill = pct_overlap)) +
+  geom_bar(stat = 'identity') +
+  geom_vline(xintercept = 2, color = "red", linetype = "dotted") +
+  scale_fill_distiller(direction = 1, breaks = c(0, 10, 20, 30, 40, 50), limits = c(0,50)) +
+  ylab("module") +
+  theme_classic(base_family = "sans", base_size = 14) +
+  theme(legend.position = "bottom",
+        plot.margin = unit(c(0,0.5,0,0.5), "cm")) +
+  facet_wrap(~hub_gene, scales ="free", nrow = 2) +
+  theme(strip.background = element_blank())
+```
+
+### Baseline WGCNA Top Modules ORA bar plots (Figure 2C)
+ 
+```{r print my arrange plot, fig.align='center', fig.width=6, fig.height=6, warning=FALSE, message=FALSE, echo=FALSE}
+print(myArrangedPlot)
+```
+
+
+```{r output plot, echo=FALSE, eval=FALSE}
+cairo_pdf(filename = "/Users/tuantran/OneDrive - Indiana University/FromGoogle/Manuscripts/KSPZV1 Manuscript/JCI Submission November 2022/Figures for JCI submission/Figure 2C Revised to ORA.pdf", width = 5, height = 4)
+addSmallLegend(myArrangedPlot)
+dev.off()
+```
+
+
+
+```{r plotdat wgcna gsea, warning=FALSE, message=FALSE, echo=FALSE, eval=FALSE}
+#GSEA bar plots (Figure 2C of pre-print)
+
+#GSEA of genes within modules that significant correlated with outcome using blood transcription modules, BloodGen3Modules, and KEGG pathways #as gene sets (BH-adjusted p<0.10). The SEC62-hubbed module did not show significant enrichment for any gene set.
+
+#Plot WGCNA GSEA Results
+#baseline analysis
 addSmallLegend <- function(myPlot, pointSize = 1.5, textSize = 3, spaceLegend = 0.3) {
     myPlot +
         guides(shape = guide_legend(override.aes = list(size = pointSize)),
@@ -274,66 +412,22 @@ myGSEAClusterPlotDat <- GSEA_baseline_bound_df$MElavenderblush2 %>%
   filter(module_type %in% myModuleTypes)
 ```
 
-### Arrange plots using ggarrange
+```{r FGSEA on WGCNA Results, warning=FALSE, message=FALSE, echo=FALSE, eval=FALSE}
+#FGSEA on WGCNA Results
+#rank by module membership
 
-```{r make ggarranged plot, warning=FALSE, message=FALSE}
-
-scale_begin <- min(myGSEAClusterPlotDat$neglogpadj, na.rm = TRUE)
-scale_end <- max(myGSEAClusterPlotDat$neglogpadj, na.rm = TRUE)
-
-myGSEAClusterPlot_EFHD2 <- myGSEAClusterPlotDat %>%
-  filter(module_hub == "EFHD2") %>%
-  ggplot(., aes(x = NES, y = pathway, fill = neglogpadj)) +
-  geom_bar(stat = 'identity') +
-  scale_fill_gradientn(colors = viridis::viridis_pal(option = "A", alpha = 0.8, direction = -1, begin = 0.25, end = 1)(9), limits=c(scale_begin, scale_end), name = "neglogpadj", na.value = "#FDE725FF") + 
-  ylab("EFHD2") +
-  xlim(c(0, max(myGSEAClusterPlotDat$NES))) +
-  theme_classic(base_family = "sans", base_size = 6) +
-  theme(legend.position = "bottom", axis.text.y = element_text(colour = rev(myGSEAClusterPlotDat$TextLabelColor)),
-        plot.margin = unit(c(0,0,0,4), "cm"))
-
-myGSEAClusterPlot_RIOK3 <- myGSEAClusterPlotDat %>%
-  filter(module_hub == "RIOK3") %>%
-  ggplot(., aes(x = NES, y = pathway, fill = neglogpadj)) +
-  geom_bar(stat = 'identity') + 
-  scale_fill_gradientn(colors = viridis::viridis_pal(option = "A", alpha = 0.8, direction = -1, begin = 0.25, end = 1)(9), limits=c(scale_begin, scale_end), name = "neglogpadj", na.value = "#FDE725FF") + 
-  ylab("RIOK3") +
-  xlim(c(0, max(myGSEAClusterPlotDat$NES))) +
-  theme_classic(base_family = "sans", base_size = 6) +
-  theme(legend.position = "none", axis.text.y = element_text(colour = rev(myGSEAClusterPlotDat$TextLabelColor)),
-        plot.margin = unit(c(0,0,0,6), "cm"))
-
-myGSEAClusterPlot_CSDE1 <- myGSEAClusterPlotDat %>%
-  filter(module_hub == "CSDE1") %>%
-  ggplot(., aes(x = NES, y = pathway, fill = neglogpadj)) +
-  geom_bar(stat = 'identity') + 
-  scale_fill_gradientn(colors = viridis::viridis_pal(option = "A", alpha = 0.8, direction = -1, begin = 0.25, end = 1)(9), limits=c(scale_begin, scale_end), name = "neglogpadj", na.value = "#FDE725FF") + 
-  ylab("CSDE1") +
-  xlim(c(0, max(myGSEAClusterPlotDat$NES))) +
-  theme_classic(base_family = "sans", base_size = 6) +
-  theme(legend.position = "none", axis.text.y = element_text(colour = rev(myGSEAClusterPlotDat$TextLabelColor)),
-        plot.margin = unit(c(0,0,0,6), "cm"))
-
-myGSEAClusterPlot_SEC62 <- myGSEAClusterPlotDat %>%
-  filter(module_hub == "SEC62") %>%
-  ggplot(., aes(x = NES, y = pathway, fill = neglogpadj)) +
-  geom_bar(stat = 'identity') + 
-  scale_fill_gradientn(colors = viridis::viridis_pal(option = "A", alpha = 0.8, direction = -1, begin = 0.25, end = 1)(9), limits=c(scale_begin, scale_end), name = "neglogpadj", na.value = "#FDE725FF") + 
-  ylab("SEC62") +
-  xlim(c(0, max(myGSEAClusterPlotDat$NES))) +
-  theme_classic(base_family = "sans", base_size = 6) +
-  theme(legend.position = "none", axis.text.y = element_text(colour = rev(myGSEAClusterPlotDat$TextLabelColor)))
-
-myArrangedPlot <- ggarrange(ggarrange(myGSEAClusterPlot_EFHD2, myGSEAClusterPlot_EFHD2, nrow = 1, common.legend = TRUE),
-                            ggarrange(ggarrange(myGSEAClusterPlot_SEC62, myGSEAClusterPlot_CSDE1, nrow = 2), myGSEAClusterPlot_RIOK3, ncol = 2,
-                                             heights = c(1.5, 1)), nrow = 2, heights=c(5,2), widths=c(0.75, 1), common.legend = TRUE)
-
+minSize <- 5
+# Make rank list; ranked by ModuleMembership correlation
+  ranks <- GSEA_baseline_bound_df <- c()
+devtools::source_url("https://github.com/TranLab/ModuleLists/blob/main/NamedGeneRankList2GseaTable.R?raw=TRUE")
+for(k in names(WGCNA_dat_select)){
+  WGCNA_dat_select[[k]] <- WGCNA_dat_select[[k]][order(WGCNA_dat_select[[k]][,2], decreasing = TRUE),]
+  ranks[[k]] <- WGCNA_dat_select[[k]][,2]
+  names(ranks[[k]]) <- WGCNA_dat_select[[k]]$GeneSymbol
+  GSEA_baseline_bound_df[[k]] <- NamedGeneRankList2GseaTable(rankedgenes = ranks[[k]], geneset = "all", output_directory = tempdir(),
+                                                        filename_prefix = paste0("FGSEA_Mod_Corr_Protect_3_mos_", k,
+                                                                                 "_minSize", minSize), scoreType = "pos", minSize = minSize, fixed_seed = TRUE)
+  }
 ```
 
-### GSEA bar plots (Figure 2C of pre-print)
 
-GSEA of genes within modules that significant correlated with outcome using blood transcription modules, BloodGen3Modules, and KEGG pathways as gene sets (BH-adjusted p<0.10). The SEC62-hubbed module did not show significant enrichment for any gene set.
-
-```{r print my arrange plot, fig.align='center', fig.width=10, fig.height=6, warning=FALSE, message=FALSE, echo=FALSE}
-print(myArrangedPlot)
-```

@@ -1,7 +1,7 @@
 ---
 title: "KSPZV1 WGCNA Delta Postvax"
 author: "Tuan M. Tran"
-date: "09/13/2021"
+date: "12/1/2022"
 output: html_document
 ---
 
@@ -52,6 +52,8 @@ cor.pval <- 0.05
 ### Load ExpressionSet
 
 ```{r load cpm eset, warning=FALSE, message=FALSE}
+#local file: "PfSPZ_cpm_ExpressionSet_230x23768_allGroups_bothBatches_delta_rmBatchFX_06082021_TMT.rds"
+
 temp <- tempfile(fileext = ".rds")
 dl <- drive_download(
   as_id("17xx0YaggLiyWdJc9rqA1nkPSE7dj05p0"), path = temp, overwrite = TRUE)
@@ -218,11 +220,147 @@ for(i in modTraitP.temp$Module){
 lapply(WGCNA_dat_select, nrow)
 ```
 
-### FGSEA on WGCNA Results
+### Overrepresentation Analysis
 
-rank by module membership
+```{r WGCNA ora}
+devtools::source_url("https://github.com/TranLab/gene-set-functions/blob/main/ApplyORA2Genesets.R?raw=TRUE")
 
-```{r FGSEA on WGCNA Results, warning=FALSE, message=FALSE}
+myuniverse <- unique(fData(x)[fData(x)$EnsemblID %in% colnames(WGCNA_matrix),]$GeneSymbol)
+ORA_baseline_bound_df <- c()
+minSize <- 15
+
+#Combine similar modules skyblue1, mediumpurple1, thistle3 in to one
+WGCNA_dat_select2 <- WGCNA_dat_select
+names(WGCNA_dat_select2) <- mytopmodules$GeneSymbol
+WGCNA_dat_select2$BTLA_CD22 <- data.table::rbindlist(list(WGCNA_dat_select2$BTLA,
+                                                          WGCNA_dat_select2$CD22), use.names = FALSE) %>%
+  as.data.frame() %>%
+  rename(kMEMEall = "kMEMEpaleturquoise")
+WGCNA_dat_select2$RIOK3_SEC62_TRIP12 <- data.table::rbindlist(list(WGCNA_dat_select2$RIOK3,
+                                                                   WGCNA_dat_select2$SEC62,
+                                                                   WGCNA_dat_select2$TRIP12), use.names = FALSE) %>%
+  as.data.frame() %>%
+  rename(kMEMEall = "kMEMEmidnightblue")
+
+
+for(k in c("KDM5D","NKG2-E", "BTLA_CD22", "RIOK3_SEC62_TRIP12")){
+  WGCNA_dat_select2[[k]] <- WGCNA_dat_select2[[k]][order(WGCNA_dat_select2[[k]][,2], decreasing = TRUE),]
+  ORA_baseline_bound_df[[k]] <- ApplyORA2Genesets(genelist = WGCNA_dat_select2[[k]]$GeneSymbol,
+                                                  geneset = "all",
+                                                  universe = myuniverse,
+                                                  output_directory = tempdir(),
+                                                  filename_prefix = paste0("ORA_Mod_Corr_Protect_3_mos_", k,
+                                                                           "_minSize", minSize),
+                                                  minSize = minSize)
+  }
+
+
+KDM5D_ORA_baseline_bound <- bind_rows(ORA_baseline_bound_df$KDM5D, .id = "module_type") %>%
+  mutate(module = "coral4") %>%
+  mutate(module_size = nrow(WGCNA_dat_select2$KDM5D)) %>%
+  mutate(hub_gene = "KDM5D")
+
+NKG2E_ORA_baseline_bound <- bind_rows(ORA_baseline_bound_df$`NKG2-E`, .id = "module_type") %>%
+  mutate(module = "lightblue4") %>%
+  mutate(module_size = nrow(WGCNA_dat_select2$`NKG2-E`)) %>%
+  mutate(hub_gene = "NKG2-E")
+
+BTLA_CD22_ORA_baseline_bound <- bind_rows(ORA_baseline_bound_df$BTLA_CD22, .id = "module_type") %>%
+  mutate(module = "the_two_amigos") %>%
+  mutate(module_size = nrow(WGCNA_dat_select2$BTLA_CD22)) %>%
+  mutate(hub_gene = "BTLA_CD22")
+
+RIOK3_SEC62_TRIP12_ORA_baseline_bound <- bind_rows(ORA_baseline_bound_df$RIOK3_SEC62_TRIP12, .id = "module_type") %>%
+  mutate(module = "the_three_amigos") %>%
+  mutate(module_size = nrow(WGCNA_dat_select2$RIOK3_SEC62_TRIP12)) %>%
+  mutate(hub_gene = "RIOK3_SEC62_TRIP12")
+
+
+ORA_baseline_allbound <- bind_rows(KDM5D_ORA_baseline_bound,
+                                  NKG2E_ORA_baseline_bound,
+                                  BTLA_CD22_ORA_baseline_bound,
+                                  RIOK3_SEC62_TRIP12_ORA_baseline_bound) %>%
+  mutate(neglogpadj = -log10(padj)) %>%
+  mutate(pct_overlap = 100*(overlap/module_size)) %>%
+  dplyr::select(module, module_size, hub_gene, module_type, pathway, overlap,
+                pct_overlap, size, overlapGenes, pval, padj, neglogpadj)
+```
+
+### Plot WGCNA Over-representation Results
+
+baseline analysis
+
+```{r plotdat wgcna ORA, warning=FALSE, message=FALSE}
+myModuleTypes <- c("MSigDB_Hallmark_v7.4", "MSigDB_C2_kegg_v7.4", "highBTMs", "lowBTMs", "BloodGen3Module", "MonacoModules")
+myORAClusterPlotDat <- ORA_baseline_allbound %>%
+  mutate(pathway = gsub("VS", "v", pathway)) %>%
+  mutate(pathway = gsub("Vd", "Vδ", pathway)) %>%
+  mutate(pathway = gsub("gd", "γδ", pathway)) %>%
+  mutate(pathway = sub(".*?\\_", "", pathway)) %>%
+  mutate(pathway = fct_reorder(pathway, neglogpadj))  %>%
+  arrange(desc(neglogpadj))%>%
+  mutate(TextLabelColor = ifelse(module_type == "BloodGen3Module", scales::muted("red"),
+                                 ifelse(module_type == "MSigDB_C2_kegg_v7.4", scales::muted("blue"),
+                                        ifelse(module_type == "MSigDB_Hallmark_v7.4", "black","gray")))) %>%
+  filter(padj < 0.01) %>%
+  filter(pct_overlap >= 5) %>%
+  filter(module_type %in% myModuleTypes) %>%
+  group_by(hub_gene) %>%
+  arrange(neglogpadj) %>%
+  slice_tail(n = 4) %>%
+  ungroup()
+```
+
+### Baseline WGCNA Top Modules ORA Bubble plots (Figure S5B)
+ 
+Over-representation analysis of genes within indicated networks which were determined by
+weight gene correlation network analysis (WGCNA) of whole-blood Δ transcriptomes.
+
+```{r prepare , warning=FALSE, message=FALSE, fig.width=6, fig.height=6}
+addSmallLegend <- function(myPlot, pointSize = 2.5, textSize = 4, spaceLegend = 0.5) {
+    myPlot +
+        guides(shape = guide_legend(override.aes = list(size = pointSize)),
+               color = guide_legend(override.aes = list(size = pointSize))) +
+        theme(legend.title = element_text(size = textSize), 
+              legend.text  = element_text(size = textSize),
+              legend.key.size = unit(spaceLegend, "lines"))
+}
+
+myfont <- "Helvetica"
+bubble_max_size <- 10
+basetextsize <- 8
+colorlabels <- myORAClusterPlotDat$TextLabelColor
+myORAClusterPlot <- myORAClusterPlotDat %>%
+  ggplot(., aes(x = hub_gene, y = pathway)) +
+  geom_point(aes(size=neglogpadj, fill = pct_overlap), alpha = 0.65, shape=21, stroke = 0.25) +
+  scale_size_area(name = expression(-log[10]~adj.~p~value), max_size = bubble_max_size) +
+  viridis::scale_fill_viridis(option= "A", begin = 0.25, end = 0.75, alpha = 0.8, direction = -1, name = "% module overlap") +
+  hrbrthemes::theme_ipsum_es(base_family = myfont, base_size = basetextsize) +
+  scale_x_discrete(limits=rev) +
+  scale_y_discrete(position = "right") +
+  ylab("pathway/module") +
+  xlab("network hub gene(s)") +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90, vjust = 1, hjust=0)) +
+  coord_flip()
+```
+
+
+```{r plot delta bubble, fig.align='center', fig.height=5, fig.width=6, echo=FALSE}
+# Apply on original plot
+addSmallLegend(myORAClusterPlot)
+```
+
+```{r save plot delta bubble, fig.align='center', fig.height=4.5, fig.width=5, echo=FALSE, eval=FALSE}
+# Apply on original plot
+# cairo_pdf(filename = "/Users/tuantran/OneDrive - Indiana University/FromGoogle/Manuscripts/KSPZV1 Manuscript/JCI Submission November 2022/Figures for JCI submission/Fig S5D delta vax WGCNA ORA.pdf", width = 5, height =4)
+# addSmallLegend(myORAClusterPlot)
+# dev.off()
+```
+
+```{r FGSEA on WGCNA Results, warning=FALSE, message=FALSE, eval=FALSE, echo=FALSE}
+#FGSEA on WGCNA Results
+#rank by module membership
 minSize <- 5
 # Make rank list; ranked by ModuleMembership correlation
   ranks <- GSEA_baseline_bound_df <- c()
@@ -237,11 +375,9 @@ for(k in names(WGCNA_dat_select)){
   }
 ```
 
-###  Results
-
-delta analysis
-
-```{r prepare data wgcna gsea, warning=FALSE, message=FALSE}
+```{r prepare data wgcna gsea, warning=FALSE, message=FALSE, eval=FALSE, echo=FALSE}
+#Results
+#delta analysis
 myModuleTypes <- c("MSigDB_Hallmark_v7.4", "MSigDB_C2_kegg_v7.4", "highBTMs", "lowBTMs", "MonacoModules", "BloodGen3Module")
 myGSEAClusterPlotDat <- GSEA_baseline_bound_df$MElightgreen %>%
   mutate(module_hub = "CD22") %>%
@@ -276,44 +412,3 @@ myGSEAClusterPlotDat <- GSEA_baseline_bound_df$MElightgreen %>%
   filter(module_type %in% myModuleTypes) %>%
   droplevels()
 ```
-
-### GSEA Bubble plot (Figure S5B in pre-print)
-
-Gene set enrichment analysis of genes ranked by membership within indicated modules which were determined by
-weight gene correlation network analysis (WGCNA) of whole-blood Δ transcriptomes.
-
-```{r prepare , warning=FALSE, message=FALSE, fig.width=6, fig.height=6}
-addSmallLegend <- function(myPlot, pointSize = 2.5, textSize = 4, spaceLegend = 0.5) {
-    myPlot +
-        guides(shape = guide_legend(override.aes = list(size = pointSize)),
-               color = guide_legend(override.aes = list(size = pointSize))) +
-        theme(legend.title = element_text(size = textSize), 
-              legend.text  = element_text(size = textSize),
-              legend.key.size = unit(spaceLegend, "lines"))
-}
-
-myfont <- "Helvetica"
-bubble_max_size <- 6
-basetextsize <- 8
-colorlabels <- myGSEAClusterPlotDat$TextLabelColor
-myGSEAClusterPlot <- myGSEAClusterPlotDat %>%
-  ggplot(., aes(x = module_hub, y = pathway)) +
-  geom_point(aes(size=neglogpadj, fill = NES), alpha = 0.65, shape=21, stroke = 0.25) +
-  scale_size_area(name = expression(-log[10]~adj.~p~value), max_size = bubble_max_size) +
-  viridis::scale_fill_viridis(option= "A", begin = 0.25, end = 0.75, alpha = 0.8, direction = -1, name = "NES") +
-  hrbrthemes::theme_ipsum_es(base_family = myfont, base_size = basetextsize) +
-  scale_x_discrete(limits=rev) +
-  scale_y_discrete(position = "right") +
-  ylab("pathway/module") +
-  xlab("WGCNA hub gene") +
-  theme(legend.position = "bottom",
-        axis.text.x = element_text(angle = 90, vjust = 1, hjust=0)) +
-  coord_flip()
-```
-
-
-```{r plot delta bubble, fig.align='center', fig.height=5, fig.width=6, echo=FALSE}
-# Apply on original plot
-addSmallLegend(myGSEAClusterPlot)
-```
-
