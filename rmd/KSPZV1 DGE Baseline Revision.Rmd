@@ -34,6 +34,7 @@ Revised analysis includes adjustments for:
 
 ```{r load SeqExpressionSet 2, message=FALSE, warning=FALSE}
 #from google drive
+#local path "/Volumes/GoogleDrive/My Drive/Tran Lab Shared/Projects/Doris Duke PfSPZ Kenya/Tuan PfSPZ/KenyaPfSPZ/Final Data Files/KSPZV1 SeqExpressionSet Baseline Reduced Phenodat 35716x487.rds"
 temp <- tempfile(fileext = ".rds")
 dl <- drive_download(
   as_id("1Q4VXYxdl9CqtzhcvHA9pn8q06_YOZgi8"), path = temp, overwrite = TRUE)
@@ -148,6 +149,90 @@ knitr::kable(temp$`9.0 x 10^5 PfSPZ`)
 
 ```{r DEG table high dose, echo = FALSE}
 knitr::kable(temp$`1.8 x 10^6 PfSPZ`)
+```
+
+### Gene Set Testing between Not Protected and Protected within a Dose Group
+
+
+```{r, camera protected vs not protected by group, message=FALSE, warning=FALSE}
+i <- "highBTMs"
+url <- paste0("https://github.com/TranLab/ModuleLists/blob/main/", i, ".rds?raw=true")
+highBTM_list <- readRDS(url(url, method="libcurl"))
+    
+# c2.indices <- ids2indices(highBTM_list, ygroup$`1.8 x 10^6 PfSPZ`$genes$GeneSymbol)
+# camera(ygroup$`1.8 x 10^6 PfSPZ`, c2.indices, design)
+# c2.indices <- ids2indices(highBTM_list, ygroup$Placebo$genes$GeneSymbol)
+# camera(ygroup$Placebo, c2.indices, design)
+
+cameratab <- highBTM.indices <- setNames(as.list(c(1:4)), c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))
+for(i in names(ygroup)){
+  Subject <- factor(xgroup[[i]]$PATID)
+  Outcome <- factor(xgroup[[i]]$Outcome, levels = c(1,0), labels = c("NotProtected","Protected"))
+  Timepoint <- factor(xgroup[[i]]$Timepoint, levels = c(0,25), labels = c("baseline","postvax"))
+  Sex <- factor(xgroup[[i]]$SEX)
+  Batch <- factor(xgroup[[i]]$SEQBATCH, levels = c("Aug2019","Nov2019"))
+  Site <- as.factor(xgroup[[i]]$site)
+  CSPAb <- as.integer(xgroup[[i]]$CSPAb)
+  CSPAb <- log10(CSPAb+1) #log transform CSP Ab data to make linear
+  Pf_VAX1 <- as.factor(xgroup[[i]]$mal.vax.1)
+  #This is the revised Timepoint 0 analysis.
+  design <- model.matrix(~Batch + Sex + Site + CSPAb + Pf_VAX1 + Outcome)
+  print(i)
+  print(colnames(design))
+  rownames(design) <- ygroup[[i]]$samples$PATID
+  ygroup[[i]]     <- estimateDisp(ygroup[[i]],design, robust = TRUE)
+  fit   <- glmQLFit(ygroup[[i]], design, robust = TRUE)
+  qlf <- glmQLFTest(fit, contrast = c(rep(0, ncol(design)-1),1))
+  highBTM.indices[[i]] <- ids2indices(highBTM_list, ygroup[[i]]$genes$GeneSymbol)
+  cameratab[[i]] <- camera(ygroup[[i]], highBTM.indices[[i]], design, contrast = c(rep(0, ncol(design)-1),1), inter.gene.cor=0.01)
+}
+for(i in names(ygroup)){
+  cameratab[[i]] <- cameratab[[i]] %>%
+    rownames_to_column(var = "module")
+}
+cameratab_bind <- dplyr::bind_rows(cameratab, .id = "dosegroup")
+```
+
+```{r plot camera dat, fig.align='center', fig.height=8, fig.width=10}
+#plotting options
+basetextsize <- 12 
+myfont <- "sans"
+bubble_max_size <- 15
+
+myCameraPlot <- cameratab_bind %>%
+  mutate(dosegroup = factor(dosegroup, levels = c("Placebo", "4.5 x 10^5 PfSPZ", "9.0 x 10^5 PfSPZ", "1.8 x 10^6 PfSPZ"))) %>%
+  filter(FDR < 0.10) %>%
+  #filter(module_type %in% c("highBTMs", "lowBTMs", "MonacoModules", "BloodGen3Module", "MSigDB_Hallmark_v7.4"))  %>%
+  #filter(!grepl("TBA", module)) %>%
+  dplyr::select(dosegroup, module, NGenes, Direction, FDR) %>%
+  mutate(neglogpadj = -log10(FDR)) %>%
+  mutate(fdr_direction = ifelse(Direction == "Up", neglogpadj*1, neglogpadj*-1)) %>%
+  mutate(module = gsub("gd", "γδ", module)) %>%
+  mutate(module = gsub("Vd2", "Vδ2", module)) %>%
+  mutate(module = gsub("Vg", "Vγ", module)) %>%
+  mutate(module = gsub("HALLMARK_", "", module)) %>%
+  mutate(module = gsub("_", " ", module)) %>%
+  mutate(module = sub(".*?\\_", "", module)) %>%
+  group_by(dosegroup) %>%
+  mutate(module = fct_reorder(module, fdr_direction, .desc = TRUE)) %>%
+  ungroup() %>%
+  mutate(dosegroup = fct_rev(dosegroup)) %>%
+  filter(!grepl("TBD", module)) %>%
+  #mutate(module_type = factor(module_type, levels = c("highBTMs", "MonacoModules", "lowBTMs", "MSigDB_Hallmark_v7.4", "BloodGen3Module"))) %>%
+  arrange(desc(neglogpadj)) %>% 
+  droplevels() %>%
+  #filter(module_type %in% c("BloodGen3Module"))  %>%
+  ggplot(., aes(x = module, y = dosegroup)) +
+  geom_point(aes(size=neglogpadj, fill = Direction), alpha = 0.65, shape=21, stroke = 0.25) +
+  scale_size_area(name = expression(-log[10]~adj.~p~value), max_size = bubble_max_size) +
+      scale_fill_manual(values = c("blue","red")) +
+  hrbrthemes::theme_ipsum_es(base_family = myfont, base_size = basetextsize) +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        strip.background = element_blank(),
+        legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
 ```
 
 ### Apply GSEA
@@ -344,4 +429,5 @@ temp$`9.0 x 10^5 PfSPZ` %>%
 temp$`1.8 x 10^6 PfSPZ` %>%
    write_csv(paste0(tabdir, "Table S1 Prevax DEG KSPZV1 rev highdose IPA adj SEX.csv"))
 ```
+
 
